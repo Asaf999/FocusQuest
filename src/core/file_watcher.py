@@ -5,6 +5,8 @@ Monitors inbox directory and processes PDFs using Claude Directory Analyzer
 import os
 import shutil
 import time
+import threading
+import queue
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -12,6 +14,7 @@ import logging
 
 from src.analysis.pdf_processor import PDFProcessor
 from src.analysis.claude_directory_analyzer import ClaudeDirectoryAnalyzer
+from src.core.processing_queue import ProcessingQueue
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +22,19 @@ logger = logging.getLogger(__name__)
 class PDFHandler(FileSystemEventHandler):
     """Handle PDF file events in watched directory"""
     
-    def __init__(self, inbox_dir: Path, processed_dir: Path):
+    def __init__(self, inbox_dir: Path, processed_dir: Path, processing_queue: ProcessingQueue = None):
         self.inbox_dir = Path(inbox_dir)
         self.processed_dir = Path(processed_dir)
-        self.processor = PDFProcessor()
-        self.analyzer = ClaudeDirectoryAnalyzer()
+        self.processing_queue = processing_queue
+        
+        # Thread-safe queue for events
+        self.event_queue = queue.Queue()
+        self.processing_lock = threading.Lock()
+        self.active_files = set()  # Track files being processed
+        
+        # Start worker thread for processing
+        self.worker_thread = threading.Thread(target=self._process_events, daemon=True)
+        self.worker_thread.start()
         
         # Ensure directories exist
         self.inbox_dir.mkdir(exist_ok=True)
@@ -32,19 +43,60 @@ class PDFHandler(FileSystemEventHandler):
     def on_created(self, event):
         """Handle new file creation events"""
         if not event.is_directory and event.src_path.endswith('.pdf'):
-            # Wait a moment for file to be fully written
-            time.sleep(1)
-            self.process_pdf(event.src_path)
+            # Queue event for processing
+            self.event_queue.put(('created', event.src_path))
             
     def on_moved(self, event):
         """Handle file move events (some apps create temp files first)"""
         if not event.is_directory and event.dest_path.endswith('.pdf'):
-            time.sleep(1)
-            self.process_pdf(event.dest_path)
+            # Queue event for processing
+            self.event_queue.put(('moved', event.dest_path))
+    
+    def _process_events(self):
+        """Worker thread to process events from queue"""
+        while True:
+            try:
+                event_type, file_path = self.event_queue.get(timeout=1.0)
+                
+                # Wait for file to be fully written
+                time.sleep(1)
+                
+                # Check if file is already being processed
+                with self.processing_lock:
+                    if file_path in self.active_files:
+                        logger.info(f"File already being processed: {file_path}")
+                        continue
+                    self.active_files.add(file_path)
+                
+                try:
+                    self._process_pdf_safe(file_path)
+                finally:
+                    # Remove from active files
+                    with self.processing_lock:
+                        self.active_files.discard(file_path)
+                        
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error in event processing thread: {e}")
             
+    def _process_pdf_safe(self, pdf_path: str):
+        """Thread-safe PDF processing"""
+        if self.processing_queue:
+            # Add to persistent queue instead of direct processing
+            self.processing_queue.add_item(pdf_path, priority="NORMAL")
+            print(f"✅ Added {Path(pdf_path).name} to processing queue")
+        else:
+            # Direct processing (legacy mode)
+            self.process_pdf(pdf_path)
+    
     def process_pdf(self, pdf_path: str):
         """Process a PDF file using Claude Directory Analyzer"""
         pdf_path = Path(pdf_path)
+        
+        # Initialize processors lazily to avoid thread issues
+        processor = PDFProcessor()
+        analyzer = ClaudeDirectoryAnalyzer()
         
         if not pdf_path.exists():
             logger.warning(f"PDF no longer exists: {pdf_path}")
@@ -56,7 +108,7 @@ class PDFHandler(FileSystemEventHandler):
         try:
             # Extract content from PDF
             print("📖 Extracting content from PDF...")
-            result = self.processor.process_pdf(str(pdf_path))
+            result = processor.process_pdf(str(pdf_path))
             
             if not result or 'error' in result:
                 print(f"❌ Error extracting content: {result.get('error', 'Unknown error')}")
@@ -95,7 +147,7 @@ class PDFHandler(FileSystemEventHandler):
                     problem_text += f"\n\nFormulas: {', '.join(problem['formulas'])}"
                     
                 # Submit for analysis
-                session_id = self.analyzer.analyze_problem_async(problem_text, metadata)
+                session_id = analyzer.analyze_problem_async(problem_text, metadata)
                 session_ids.append(session_id)
                 print(f"✅ Analysis session started: {session_id}")
                 
@@ -114,17 +166,32 @@ class PDFHandler(FileSystemEventHandler):
             return []
             
     def _move_to_processed(self, pdf_path: Path):
-        """Move PDF to processed directory with timestamp"""
+        """Move PDF to processed directory with timestamp (thread-safe)"""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         new_name = f"{timestamp}_{pdf_path.name}"
         dest_path = self.processed_dir / new_name
         
+        # Use atomic rename operation
         try:
-            shutil.move(str(pdf_path), str(dest_path))
+            # Ensure source still exists (race condition check)
+            if not pdf_path.exists():
+                logger.warning(f"Source file no longer exists: {pdf_path}")
+                return
+                
+            # Use rename for atomic operation on same filesystem
+            pdf_path.rename(dest_path)
             print(f"📁 Moved to processed: {new_name}")
-        except Exception as e:
-            logger.error(f"Error moving file: {e}")
-            print(f"⚠️ Could not move file: {e}")
+        except FileNotFoundError:
+            logger.warning(f"File already moved: {pdf_path}")
+        except OSError:
+            # Different filesystem, use copy+delete
+            try:
+                shutil.copy2(str(pdf_path), str(dest_path))
+                pdf_path.unlink()
+                print(f"📁 Moved to processed: {new_name}")
+            except Exception as e:
+                logger.error(f"Error moving file: {e}")
+                print(f"⚠️ Could not move file: {e}")
 
 
 class FileWatcher:
@@ -135,8 +202,12 @@ class FileWatcher:
         self.inbox_dir = Path(inbox_dir) if inbox_dir else project_root / "inbox"
         self.processed_dir = Path(processed_dir) if processed_dir else project_root / "processed"
         
+        # Create persistent processing queue
+        self.processing_queue = ProcessingQueue()
+        
         self.observer = Observer()
-        self.handler = PDFHandler(self.inbox_dir, self.processed_dir)
+        self.handler = PDFHandler(self.inbox_dir, self.processed_dir, self.processing_queue)
+        self.running = False
         
     def start(self):
         """Start watching the inbox directory"""
@@ -148,13 +219,18 @@ class FileWatcher:
         print("🤖 Claude Code will analyze problems in the background")
         print("Press Ctrl+C to stop...")
         
+        self.running = True
         try:
-            while True:
+            while self.running:
                 time.sleep(1)
         except KeyboardInterrupt:
-            self.observer.stop()
-            print("\n👋 File watcher stopped")
+            self.stop()
             
+    def stop(self):
+        """Stop the file watcher gracefully"""
+        self.running = False
+        self.observer.stop()
+        print("\n👋 File watcher stopped")
         self.observer.join()
         
     def process_existing_files(self):

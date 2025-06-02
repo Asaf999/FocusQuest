@@ -68,8 +68,10 @@ class ProblemWidget(QWidget):
         super().__init__()
         self.problem_data = problem_data
         self.current_step = 0
+        self.current_step_index = 0  # For panic state preservation
         self.current_hint_level = 0
         self.step_widgets: List[StepWidget] = []
+        self.timer_paused = False
         self.init_ui()
         self.show_current_step()
         
@@ -144,6 +146,9 @@ class ProblemWidget(QWidget):
         
     def show_current_step(self):
         """Show only the current step"""
+        # Update current_step_index for external access
+        self.current_step_index = self.current_step
+        
         # Hide all steps
         for widget in self.step_widgets:
             widget.hide()
@@ -227,3 +232,14 @@ class ProblemWidget(QWidget):
         if self.elapsed_time > expected_duration * 1.5:
             # Taking 50% longer than expected - maybe show encouragement
             self.timer_label.setStyleSheet("color: #ff9944;")  # Orange warning
+    
+    def pause_timer(self):
+        """Pause the step timer (for panic mode)"""
+        self.timer_paused = True
+        self.step_timer.stop()
+        
+    def resume_timer(self):
+        """Resume the step timer after panic mode"""
+        if self.timer_paused:
+            self.timer_paused = False
+            self.step_timer.start(1000)

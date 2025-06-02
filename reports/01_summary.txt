@@ -1,0 +1,6 @@
+Key findings from architecture analysis:
+- CRITICAL: Thread safety bug in FileWatcher - can lose PDFs
+- CRITICAL: No crash recovery - devastating for ADHD users
+- HIGH: Memory leak in ProblemLoader - app slows over time
+- Must fix before Phase 7: Thread safety, crash recovery, memory leaks
+- Architecture too tightly coupled for easy Claude API integration

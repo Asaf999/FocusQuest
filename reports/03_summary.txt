@@ -1,0 +1,7 @@
+Performance & resilience critical issues:
+- Memory leaks: PIL images, unbounded cache, session dirs never cleaned
+- No graceful shutdown: Ctrl+C loses data, resources leak
+- No memory monitoring: Can OOM under load
+- No circuit breaker: Claude failures waste resources
+- Resource cleanup only in finally blocks: Hard crashes leak
+Must fix: Signal handlers, bounded caches, memory checks, circuit breaker

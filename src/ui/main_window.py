@@ -3,9 +3,9 @@ Main window for FocusQuest - ADHD-optimized learning interface
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QStackedWidget
+    QPushButton, QStackedWidget, QLabel, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QKeySequence, QAction, QPalette, QColor, QShortcut
 from typing import Optional
 
@@ -26,6 +26,9 @@ class FocusQuestWindow(QMainWindow):
         super().__init__()
         self.current_problem = None
         self.focus_mode = False
+        self.panic_mode = False
+        self.panic_overlay = None
+        self.panic_state = {}
         self.init_ui()
         self.setup_shortcuts()
         self.apply_dark_theme()
@@ -109,6 +112,12 @@ class FocusQuestWindow(QMainWindow):
         self.pause_action.setShortcut(QKeySequence(Qt.Key.Key_Escape))
         self.pause_action.triggered.connect(self.pause_session)
         self.addAction(self.pause_action)
+        
+        # ADHD Panic button (ESC+P or Ctrl+P)
+        self.panic_action = QAction("Panic Mode", self)
+        self.panic_action.setShortcut(QKeySequence("Ctrl+P"))
+        self.panic_action.triggered.connect(self.trigger_panic_mode)
+        self.addAction(self.panic_action)
         
         # Focus mode (F)
         focus_shortcut = QShortcut(QKeySequence("F"), self)
@@ -209,3 +218,160 @@ class FocusQuestWindow(QMainWindow):
         self.xp_widget.set_xp(xp % 100, 100)  # XP within current level
         self.xp_widget.set_level(level)
         self.xp_widget.set_streak(streak)
+    
+    def trigger_panic_mode(self):
+        """Enter ADHD panic mode - immediate relief"""
+        if self.panic_mode:
+            return  # Already in panic mode
+            
+        self.panic_mode = True
+        
+        # Save current state
+        if self.problem_widget:
+            self.panic_state = {
+                'step_index': getattr(self.problem_widget, 'current_step_index', 0),
+                'elapsed_time': getattr(self.problem_widget, 'elapsed_time', 0)
+            }
+            # Pause timer
+            if hasattr(self.problem_widget, 'pause_timer'):
+                self.problem_widget.pause_timer()
+        
+        # Pause session
+        if hasattr(self, 'session_manager'):
+            self.session_manager.pause_session()
+        
+        # Create calming overlay
+        self._create_panic_overlay()
+        
+    def _create_panic_overlay(self):
+        """Create the panic mode overlay"""
+        # Create full-screen overlay
+        self.panic_overlay = QWidget(self)
+        self.panic_overlay.setObjectName("panicOverlay")
+        self.panic_overlay.setStyleSheet("""
+            #panicOverlay {
+                background-color: rgba(20, 20, 20, 0.95);
+            }
+        """)
+        
+        # Center layout
+        layout = QVBoxLayout(self.panic_overlay)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(30)
+        
+        # Breathing guide widget
+        self.panic_overlay.breathing_guide = QWidget()
+        self.panic_overlay.breathing_guide.setFixedSize(200, 200)
+        self.panic_overlay.breathing_guide.setStyleSheet("""
+            QWidget {
+                background-color: #4fc3f7;
+                border-radius: 100px;
+            }
+        """)
+        
+        # Breathing animation
+        self.panic_overlay.breathing_guide.animation = QPropertyAnimation(
+            self.panic_overlay.breathing_guide, b"minimumSize"
+        )
+        self.panic_overlay.breathing_guide.animation.setDuration(4000)
+        self.panic_overlay.breathing_guide.animation.setStartValue(self.panic_overlay.breathing_guide.size())
+        self.panic_overlay.breathing_guide.animation.setEndValue(self.panic_overlay.breathing_guide.size() * 0.7)
+        self.panic_overlay.breathing_guide.animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self.panic_overlay.breathing_guide.animation.setLoopCount(-1)  # Infinite loop
+        self.panic_overlay.breathing_guide.animation.start()
+        
+        layout.addWidget(self.panic_overlay.breathing_guide, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # Calming message
+        self.panic_overlay.message_label = QLabel(
+            "Take a deep breath\n\n"
+            "It's okay to pause\n\n"
+            "You're doing great"
+        )
+        self.panic_overlay.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.panic_overlay.message_label.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                font-size: 20pt;
+                font-weight: 300;
+                line-height: 1.5;
+            }
+        """)
+        layout.addWidget(self.panic_overlay.message_label)
+        
+        # Resume button
+        self.panic_overlay.resume_button = QPushButton("I'm ready to continue")
+        self.panic_overlay.resume_button.setObjectName("resumeButton")
+        self.panic_overlay.resume_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4caf50;
+                color: white;
+                font-size: 16pt;
+                padding: 15px 30px;
+                border-radius: 25px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #5cbf60;
+            }
+        """)
+        self.panic_overlay.resume_button.clicked.connect(self.resume_from_panic)
+        layout.addWidget(self.panic_overlay.resume_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # Show overlay
+        self.panic_overlay.resize(self.size())
+        self.panic_overlay.show()
+        self.panic_overlay.raise_()
+        
+        # Fade in effect
+        opacity_effect = QGraphicsOpacityEffect()
+        self.panic_overlay.setGraphicsEffect(opacity_effect)
+        self.fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
+        self.fade_animation.setDuration(500)
+        self.fade_animation.setStartValue(0.0)
+        self.fade_animation.setEndValue(1.0)
+        self.fade_animation.start()
+        
+    def resume_from_panic(self):
+        """Resume from panic mode"""
+        if not self.panic_mode:
+            return
+            
+        # Stop breathing animation
+        if hasattr(self.panic_overlay, 'breathing_guide'):
+            self.panic_overlay.breathing_guide.animation.stop()
+        
+        # Fade out and remove overlay
+        opacity_effect = self.panic_overlay.graphicsEffect()
+        if opacity_effect:
+            self.fade_out_animation = QPropertyAnimation(opacity_effect, b"opacity")
+            self.fade_out_animation.setDuration(300)
+            self.fade_out_animation.setStartValue(1.0)
+            self.fade_out_animation.setEndValue(0.0)
+            self.fade_out_animation.finished.connect(self._cleanup_panic_overlay)
+            self.fade_out_animation.start()
+        else:
+            self._cleanup_panic_overlay()
+        
+    def _cleanup_panic_overlay(self):
+        """Clean up panic overlay after fade out"""
+        if self.panic_overlay:
+            self.panic_overlay.hide()
+            self.panic_overlay.deleteLater()
+            self.panic_overlay = None
+        
+        self.panic_mode = False
+        
+        # Resume timers
+        if self.problem_widget and hasattr(self.problem_widget, 'resume_timer'):
+            self.problem_widget.resume_timer()
+        
+        # Resume session
+        if hasattr(self, 'session_manager'):
+            self.session_manager.resume_session()
+    
+    def resizeEvent(self, event):
+        """Handle window resize to keep panic overlay full screen"""
+        super().resizeEvent(event)
+        if self.panic_overlay and self.panic_overlay.isVisible():
+            self.panic_overlay.resize(self.size())

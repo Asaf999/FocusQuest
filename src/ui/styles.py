@@ -256,5 +256,34 @@ QToolTip {
     outline-offset: 2px;
 }
 
+/* Panic mode overlay */
+#panicOverlay {
+    background-color: rgba(20, 20, 20, 0.95);
+}
+
+#panicOverlay QLabel {
+    color: #e0e0e0;
+    font-size: 20pt;
+    font-weight: 300;
+}
+
+#resumeButton {
+    background-color: #4caf50;
+    color: white;
+    font-size: 16pt;
+    padding: 15px 30px;
+    border-radius: 25px;
+    font-weight: bold;
+    min-width: 250px;
+}
+
+#resumeButton:hover {
+    background-color: #5cbf60;
+}
+
+#resumeButton:pressed {
+    background-color: #3c9f40;
+}
+
 /* Animations and transitions would be defined in code */
 """

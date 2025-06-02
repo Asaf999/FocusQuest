@@ -1,0 +1,7 @@
+ADHD gaps requiring immediate attention:
+- NO PANIC BUTTON - users forced to crash-quit when overwhelmed
+- Break reminders exist but don't actually notify - hyperfocus risk
+- Medication reminder in database but no UI - wasted feature
+- No skip option - anxiety spirals when stuck on problems
+- No "bad day mode" - excludes users on low-function days
+Combined with Section 1: Thread safety + crash recovery + ADHD panic = CRITICAL
