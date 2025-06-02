@@ -72,18 +72,39 @@ class ProblemLoader(QThread):
 
 
 class FocusQuestApp:
-    """Main application controller"""
+    """Main application controller with crash recovery"""
     
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.app.setApplicationName("FocusQuest")
         self.app.setOrganizationName("FocusQuest")
         
+        # State management
+        self.state_file = Path("data") / "app_state.json"
+        self.running = True
+        self.current_problem_id = None
+        
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        atexit.register(self._cleanup)
+        
         # Initialize components
         self.db_manager = DatabaseManager()
         self.session_manager = SessionManager()
         self.main_window = FocusQuestWindow()
         self.problem_loader = ProblemLoader(self.db_manager)
+        
+        # Override window close event
+        self.main_window.closeEvent = self._on_window_close
+        
+        # Setup autosave timer
+        self.autosave_timer = QTimer()
+        self.autosave_timer.timeout.connect(self._save_state)
+        self.autosave_timer.start(30000)  # Save every 30 seconds
+        
+        # Check for crash recovery
+        self._check_crash_recovery()
         
         # Connect signals
         self.setup_connections()
@@ -141,7 +162,9 @@ class FocusQuestApp:
         
     def on_problem_loaded(self, problem_data: dict):
         """Handle problem loaded"""
+        self.current_problem_id = problem_data['id']
         self.main_window.load_problem(problem_data)
+        self._save_state()  # Save state after loading problem
         
     def on_problem_completed(self, problem_id: int):
         """Handle problem completion"""
@@ -202,6 +225,163 @@ class FocusQuestApp:
             "Error",
             f"An error occurred:\n{error_message}"
         )
+    
+    def _signal_handler(self, signum, frame):
+        """Handle system signals for graceful shutdown"""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        self.shutdown()
+    
+    def _on_window_close(self, event):
+        """Handle window close event"""
+        logger.info("Window close requested, saving state...")
+        self._save_state()
+        self.session_manager.end_session()
+        event.accept()
+    
+    def _save_state(self):
+        """Save current application state"""
+        if not self.running:
+            return
+            
+        try:
+            state = {
+                'timestamp': datetime.now().isoformat(),
+                'session_id': getattr(self.session_manager, 'current_session_id', None),
+                'current_problem_id': self.current_problem_id,
+                'session_duration': self.session_manager.get_session_duration() if hasattr(self.session_manager, 'get_session_duration') else 0,
+                'problems_completed': getattr(self.session_manager, 'problems_completed', 0),
+                'window_geometry': {
+                    'x': self.main_window.x(),
+                    'y': self.main_window.y(),
+                    'width': self.main_window.width(),
+                    'height': self.main_window.height()
+                },
+                'ui_state': {
+                    'focus_mode': getattr(self.main_window, 'focus_mode', False),
+                    'current_step': self._get_current_step()
+                }
+            }
+            
+            # Write state atomically
+            temp_file = self.state_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(state, f, indent=2)
+            temp_file.replace(self.state_file)
+            
+            logger.debug("State saved successfully")
+            
+        except Exception as e:
+            logger.error(f"Error saving state: {e}")
+    
+    def _get_current_step(self):
+        """Get current problem step from UI"""
+        try:
+            if hasattr(self.main_window, 'problem_widget') and self.main_window.problem_widget:
+                return getattr(self.main_window.problem_widget, 'current_step', 0)
+        except:
+            pass
+        return 0
+    
+    def _check_crash_recovery(self):
+        """Check for and recover from previous crash"""
+        if not self.state_file.exists():
+            return
+            
+        try:
+            with open(self.state_file, 'r') as f:
+                state = json.load(f)
+            
+            # Check if state is recent (within last hour)
+            timestamp = datetime.fromisoformat(state['timestamp'])
+            if (datetime.now() - timestamp).total_seconds() > 3600:
+                logger.info("State file too old, ignoring")
+                self.state_file.unlink()
+                return
+            
+            # Offer recovery
+            reply = QMessageBox.question(
+                None,
+                "Recover Previous Session?",
+                f"FocusQuest didn't shut down properly.\n\n"
+                f"Would you like to recover your previous session?\n"
+                f"Problem ID: {state.get('current_problem_id', 'Unknown')}\n"
+                f"Time in session: {state.get('session_duration', 0) // 60} minutes",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self._restore_state(state)
+            else:
+                self.state_file.unlink()
+                
+        except Exception as e:
+            logger.error(f"Error checking crash recovery: {e}")
+            if self.state_file.exists():
+                self.state_file.unlink()
+    
+    def _restore_state(self, state):
+        """Restore application state from saved data"""
+        try:
+            # Restore window position
+            if 'window_geometry' in state:
+                geo = state['window_geometry']
+                self.main_window.setGeometry(geo['x'], geo['y'], geo['width'], geo['height'])
+            
+            # Restore UI state
+            if 'ui_state' in state:
+                if state['ui_state'].get('focus_mode'):
+                    self.main_window.toggle_focus_mode()
+            
+            # Set current problem ID for recovery
+            self.current_problem_id = state.get('current_problem_id')
+            
+            # Session will be started fresh but we note the recovery
+            logger.info(f"Recovered state from {state['timestamp']}")
+            
+        except Exception as e:
+            logger.error(f"Error restoring state: {e}")
+    
+    def _cleanup(self):
+        """Cleanup resources on exit"""
+        logger.info("Performing cleanup...")
+        self.running = False
+        
+        # Stop autosave timer
+        if hasattr(self, 'autosave_timer'):
+            self.autosave_timer.stop()
+        
+        # Save final state
+        self._save_state()
+        
+        # End session if active
+        if hasattr(self, 'session_manager'):
+            try:
+                self.session_manager.end_session()
+            except:
+                pass
+        
+        # Close database connections
+        if hasattr(self, 'db_manager'):
+            try:
+                self.db_manager.close()
+            except:
+                pass
+        
+        # Remove state file on clean exit
+        if self.state_file.exists():
+            try:
+                self.state_file.unlink()
+            except:
+                pass
+    
+    def shutdown(self):
+        """Graceful shutdown"""
+        logger.info("Initiating graceful shutdown...")
+        self._cleanup()
+        
+        # Close the application
+        if hasattr(self, 'app'):
+            self.app.quit()
 
 
 def main():
@@ -210,9 +390,16 @@ def main():
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
     
-    # Create and run application
-    app = FocusQuestApp()
-    return app.start()
+    try:
+        # Create and run application
+        app = FocusQuestApp()
+        return app.start()
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+        return 0
+    except Exception as e:
+        logger.error(f"Unhandled exception: {e}", exc_info=True)
+        return 1
 
 
 if __name__ == "__main__":
