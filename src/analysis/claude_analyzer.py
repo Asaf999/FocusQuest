@@ -15,6 +15,7 @@ from datetime import datetime, time as time_type, timedelta
 from functools import lru_cache
 from collections import OrderedDict
 import hashlib
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,18 @@ logger = logging.getLogger(__name__)
 class AnalysisError(Exception):
     """Error during problem analysis"""
     pass
+
+
+class CircuitBreakerError(Exception):
+    """Error when circuit breaker is open"""
+    pass
+
+
+class CircuitState(Enum):
+    """Circuit breaker states"""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Blocking calls due to failures
+    HALF_OPEN = "half_open"  # Testing if service has recovered
 
 
 @dataclass
@@ -157,7 +170,10 @@ class ClaudeAnalyzer:
     """Analyzes mathematical problems using Claude Code CLI (FREE with Pro)"""
     
     def __init__(self, claude_cmd: str = "claude", cache_enabled: bool = True, timeout: int = 120, 
-                 max_cache_size: int = 100, cache_ttl_hours: int = 24):
+                 max_cache_size: int = 100, cache_ttl_hours: int = 24,
+                 circuit_breaker_enabled: bool = True, failure_threshold: int = 3,
+                 recovery_timeout: int = 300, half_open_max_calls: int = 2,
+                 max_recovery_timeout: int = 3600):
         self.claude_cmd = claude_cmd
         self.cache_enabled = cache_enabled
         self.timeout = timeout
@@ -167,6 +183,25 @@ class ClaudeAnalyzer:
         self._cache_timestamps = {}  # Track when each entry was created
         self.max_retries = 3
         
+        # Circuit breaker configuration
+        self.circuit_breaker_enabled = circuit_breaker_enabled
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout  # seconds
+        self.half_open_max_calls = half_open_max_calls
+        self.max_recovery_timeout = max_recovery_timeout
+        self.initial_recovery_timeout = recovery_timeout
+        
+        # Circuit breaker state
+        self.circuit_state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.last_failure_time: Optional[datetime] = None
+        self.half_open_calls = 0
+        
+        # Metrics tracking
+        self.total_calls = 0
+        self.failed_calls = 0
+        self.circuit_opened_count = 0
+        
     def analyze_problem(
         self, 
         problem: Dict[str, Any],
@@ -175,6 +210,10 @@ class ClaudeAnalyzer:
         timeout: Optional[float] = None
     ) -> ProblemAnalysis:
         """Analyze a mathematical problem with ADHD optimizations using Claude CLI"""
+        # Check circuit breaker state first
+        if self.circuit_breaker_enabled:
+            self._check_circuit_state()
+            
         if not profile:
             profile = ADHDProfile()
             
@@ -188,33 +227,58 @@ class ClaudeAnalyzer:
         # Build prompt
         prompt = self._build_prompt(problem, profile)
         
-        # Call CLI with retries
+        # Call CLI with retries and circuit breaker
         max_retries = max_retries or self.max_retries
         timeout = timeout or self.timeout
         
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                    
-                response = self._run_claude_cli(prompt, timeout)
-                break
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise AnalysisError(f"Failed after {max_retries} retries: {str(e)}")
-                logger.warning(f"CLI call attempt {attempt + 1} failed: {str(e)}")
+        self.total_calls += 1
         
-        # Parse response
         try:
-            analysis = self._parse_response(response)
-        except Exception as e:
-            raise AnalysisError(f"Failed parsing response: {str(e)}")
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        
+                    response = self._run_claude_cli(prompt, timeout)
+                    
+                    # Success - record in circuit breaker
+                    if self.circuit_breaker_enabled:
+                        self._record_success()
+                    
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        # Record failure in circuit breaker
+                        if self.circuit_breaker_enabled:
+                            self._record_failure()
+                        raise AnalysisError(f"Failed after {max_retries} retries: {str(e)}")
+                    logger.warning(f"CLI call attempt {attempt + 1} failed: {str(e)}")
             
-        # Cache result with LRU management
-        if self.cache_enabled:
-            self._put_in_cache(cache_key, analysis)
+            # Parse response
+            try:
+                analysis = self._parse_response(response)
+            except Exception as e:
+                raise AnalysisError(f"Failed parsing response: {str(e)}")
+                
+            # Cache result with LRU management
+            if self.cache_enabled:
+                self._put_in_cache(cache_key, analysis)
+                
+            return analysis
             
-        return analysis
+        except AnalysisError as e:
+            # Check if we can provide a cached fallback or manual entry mode
+            if self.circuit_state == CircuitState.OPEN:
+                # Try to serve from cache if available
+                cached_result = self._get_from_cache(cache_key, ignore_ttl=True)
+                if cached_result is not None:
+                    logger.info("Serving stale cached response due to circuit breaker")
+                    return cached_result
+                    
+                # Provide fallback analysis
+                return self.get_fallback_analysis(problem.get('translated_text', ''))
+            else:
+                raise
     
     def _get_cache_key(self, problem: Dict, profile: ADHDProfile) -> str:
         """Generate cache key for problem + profile"""
@@ -390,13 +454,13 @@ Remember:
         
         return analysis
     
-    def _get_from_cache(self, cache_key: str) -> Optional[ProblemAnalysis]:
+    def _get_from_cache(self, cache_key: str, ignore_ttl: bool = False) -> Optional[ProblemAnalysis]:
         """Get item from cache with TTL and LRU management"""
         if cache_key not in self._cache:
             return None
         
-        # Check if entry has expired
-        if cache_key in self._cache_timestamps:
+        # Check if entry has expired (unless ignoring TTL for circuit breaker fallback)
+        if not ignore_ttl and cache_key in self._cache_timestamps:
             entry_time = self._cache_timestamps[cache_key]
             if datetime.now() - entry_time > self.cache_ttl:
                 # Remove expired entry
@@ -451,6 +515,237 @@ Remember:
         """Clear all cache entries"""
         self._cache.clear()
         self._cache_timestamps.clear()
+    
+    def analyze_problems(self, content: str, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Analyze problems with circuit breaker protection (plural interface)."""
+        problem = {
+            'translated_text': content,
+            'difficulty': 3
+        }
+        profile = ADHDProfile()
+        
+        try:
+            analysis = self.analyze_problem(problem, profile, timeout=timeout)
+            return {
+                'problems': [{
+                    'text': content,
+                    'steps': [{'content': step.description} for step in analysis.steps],
+                    'hints': [],
+                    'difficulty': analysis.difficulty_rating
+                }]
+            }
+        except AnalysisError:
+            # Re-raise as circuit breaker error for proper handling
+            raise CircuitBreakerError(
+                "Claude AI is temporarily having trouble, but don't worry! "
+                "You can continue learning while it recovers. "
+                "Try manual problem entry or take a short break."
+            )
+    
+    def _check_circuit_state(self):
+        """Check circuit breaker state and throw error if open."""
+        if self.circuit_state == CircuitState.OPEN:
+            # Check if enough time has passed for recovery attempt
+            if (self.last_failure_time and 
+                datetime.now() - self.last_failure_time >= timedelta(seconds=self.recovery_timeout)):
+                # Transition to half-open for testing
+                self.circuit_state = CircuitState.HALF_OPEN
+                self.half_open_calls = 0
+                logger.info("Circuit breaker transitioning to half-open state")
+            else:
+                # Still in open state, block the call
+                raise CircuitBreakerError(
+                    "Claude AI is temporarily having trouble, but don't worry! "
+                    "It's taking a short break to recover. "
+                    f"Please try again in {self._get_recovery_time_remaining()} seconds, "
+                    "or continue with manual problem entry."
+                )
+        elif self.circuit_state == CircuitState.HALF_OPEN:
+            # Check if we've exceeded half-open call limit
+            if self.half_open_calls >= self.half_open_max_calls:
+                # Too many calls in half-open, go back to open
+                self.circuit_state = CircuitState.OPEN
+                self.last_failure_time = datetime.now()
+                raise CircuitBreakerError("Still experiencing issues, taking another break...")
+    
+    def _record_success(self):
+        """Record successful call in circuit breaker."""
+        if self.circuit_state == CircuitState.HALF_OPEN:
+            self.half_open_calls += 1
+            
+            # If we've had enough successful calls in half-open, close the circuit
+            if self.half_open_calls >= self.half_open_max_calls:
+                self.circuit_state = CircuitState.CLOSED
+                self.failure_count = 0
+                self.half_open_calls = 0
+                self.recovery_timeout = self.initial_recovery_timeout  # Reset backoff
+                self._notify_recovery()
+                logger.info("Circuit breaker closed - service recovered")
+        elif self.circuit_state == CircuitState.CLOSED:
+            # Reset failure count on success
+            if self.failure_count > 0:
+                self.failure_count = 0
+    
+    def _record_failure(self):
+        """Record failed call in circuit breaker."""
+        self.failure_count += 1
+        self.failed_calls += 1
+        self.last_failure_time = datetime.now()
+        
+        if self.circuit_state == CircuitState.HALF_OPEN:
+            # Failure in half-open state - go back to open
+            self.circuit_state = CircuitState.OPEN
+            self._calculate_backoff_timeout()
+            logger.warning("Circuit breaker opened - service still failing")
+        elif (self.circuit_state == CircuitState.CLOSED and 
+              self.failure_count >= self.failure_threshold):
+            # Too many failures - open the circuit
+            self.circuit_state = CircuitState.OPEN
+            self.circuit_opened_count += 1
+            self._calculate_backoff_timeout()
+            logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
+    
+    def _calculate_backoff_timeout(self):
+        """Calculate exponential backoff for recovery timeout."""
+        # Exponential backoff: double the timeout each time, up to max
+        backoff_multiplier = 2 ** (self.circuit_opened_count - 1)
+        self.recovery_timeout = min(
+            self.initial_recovery_timeout * backoff_multiplier,
+            self.max_recovery_timeout
+        )
+        logger.debug(f"Recovery timeout set to {self.recovery_timeout} seconds")
+    
+    def _get_recovery_time_remaining(self) -> int:
+        """Get seconds remaining until recovery attempt."""
+        if not self.last_failure_time:
+            return 0
+        elapsed = (datetime.now() - self.last_failure_time).total_seconds()
+        return max(0, int(self.recovery_timeout - elapsed))
+    
+    def _notify_recovery(self):
+        """Notify that circuit breaker has recovered (placeholder for future notification)."""
+        # This could trigger a UI notification in the future
+        pass
+    
+    def get_fallback_analysis(self, problem_text: str) -> Dict[str, Any]:
+        """Provide fallback analysis when Claude is unavailable."""
+        logger.info("Providing fallback analysis due to Claude unavailability")
+        
+        # Basic problem structure for manual entry
+        fallback_problem = {
+            'original_text': problem_text,
+            'translated_text': problem_text,
+            'manual_entry': True,
+            'steps': [
+                {
+                    'content': 'Read and understand the problem carefully',
+                    'duration': 3,
+                    'manual': True
+                },
+                {
+                    'content': 'Identify what you need to find',
+                    'duration': 2,
+                    'manual': True
+                },
+                {
+                    'content': 'Plan your solution approach',
+                    'duration': 5,
+                    'manual': True
+                },
+                {
+                    'content': 'Work through the problem step by step',
+                    'duration': 10,
+                    'manual': True
+                },
+                {
+                    'content': 'Check your answer makes sense',
+                    'duration': 2,
+                    'manual': True
+                }
+            ],
+            'hints': [
+                {
+                    'level': 1,
+                    'content': 'Take your time and break this down into smaller parts'
+                },
+                {
+                    'level': 2, 
+                    'content': 'What information is given? What do you need to find?'
+                },
+                {
+                    'level': 3,
+                    'content': 'Consider similar problems you\'ve solved before'
+                }
+            ],
+            'difficulty': 3,
+            'adhd_tips': [
+                'It\'s okay to take breaks while working on this',
+                'Focus on one step at a time',
+                'Ask for help if you get stuck'
+            ]
+        }
+        
+        return {
+            'problems': [fallback_problem],
+            'manual_entry': True,
+            'note': 'Claude AI is temporarily unavailable. Continue learning with manual problem solving!'
+        }
+    
+    def get_circuit_metrics(self) -> Dict[str, Any]:
+        """Get circuit breaker metrics for monitoring."""
+        success_rate = 0.0
+        if self.total_calls > 0:
+            success_rate = (self.total_calls - self.failed_calls) / self.total_calls
+            
+        return {
+            'current_state': self.circuit_state.value,
+            'total_calls': self.total_calls,
+            'failed_calls': self.failed_calls,
+            'success_rate': success_rate,
+            'failure_count': self.failure_count,
+            'circuit_opened_count': self.circuit_opened_count,
+            'last_failure_time': self.last_failure_time.isoformat() if self.last_failure_time else None,
+            'recovery_timeout': self.recovery_timeout,
+            'time_until_recovery': self._get_recovery_time_remaining()
+        }
+    
+    def perform_health_check(self) -> bool:
+        """Perform health check on Claude CLI."""
+        try:
+            # Simple health check - try to run claude with --version or similar
+            result = subprocess.run(
+                [self.claude_cmd, '--version'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def save_circuit_state(self) -> Dict[str, Any]:
+        """Save circuit breaker state for persistence."""
+        return {
+            'circuit_state': self.circuit_state.value,
+            'failure_count': self.failure_count,
+            'last_failure_time': self.last_failure_time.isoformat() if self.last_failure_time else None,
+            'half_open_calls': self.half_open_calls,
+            'recovery_timeout': self.recovery_timeout,
+            'circuit_opened_count': self.circuit_opened_count,
+            'total_calls': self.total_calls,
+            'failed_calls': self.failed_calls
+        }
+    
+    def restore_circuit_state(self, state: Dict[str, Any]):
+        """Restore circuit breaker state from saved data."""
+        self.circuit_state = CircuitState(state['circuit_state'])
+        self.failure_count = state['failure_count']
+        self.last_failure_time = datetime.fromisoformat(state['last_failure_time']) if state['last_failure_time'] else None
+        self.half_open_calls = state['half_open_calls']
+        self.recovery_timeout = state['recovery_timeout']
+        self.circuit_opened_count = state['circuit_opened_count']
+        self.total_calls = state['total_calls']
+        self.failed_calls = state['failed_calls']
 
 
 # Convenience function for quick analysis
