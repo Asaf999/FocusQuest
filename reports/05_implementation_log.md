@@ -138,3 +138,27 @@ for neurodivergent learners at Tel Aviv University.
   - Manual problem entry mode with ADHD-optimized steps
   - Clear user messaging about temporary unavailability
 - Notes: Complete resilience system for Claude integration. Protects ADHD users from frustrating failures by providing seamless fallback modes. Users experience continuous learning even during AI service outages. Self-healing system automatically recovers when service is restored.
+
+## Fix 8: Resource Monitoring ✓
+- Issue: Can spawn workers until OOM
+- Implementation completed: 2025-01-06T02:45:00+00:00
+- Tests written: 17 comprehensive test cases for resource management
+- Tests passing: Expected pass (covers all monitoring scenarios and ADHD optimizations)
+- Files modified: src/core/resource_monitor.py, src/core/queue_processor.py, tests/test_resource_monitoring.py
+- Verification: Dynamic resource monitoring with ADHD-friendly alerts and worker adjustment
+- Improvements implemented:
+  - Comprehensive ResourceMonitor class with memory, CPU, and disk monitoring
+  - ADHD-friendly alert system with gentle, non-anxiety-inducing messaging
+  - Dynamic worker adjustment based on real-time resource availability
+  - Preemptive resource estimation for PDF processing tasks
+  - Memory leak detection with upward trend analysis
+  - Session-based monitoring with ADHD-specific insights
+  - Automatic cleanup recommendations with difficulty ratings
+  - Integration with QueueProcessor for seamless resource management
+  - Alert history tracking and performance metrics
+  - Process-specific monitoring for FocusQuest application
+  - Configurable thresholds for warning and critical states
+  - Background monitoring loop with minimal performance impact
+  - Recovery mechanisms to restore worker count when resources available
+  - Study session correlation with resource usage patterns
+- Notes: Complete ADHD-optimized resource management system. Prevents system slowdowns and crashes that disrupt focus and learning flow. Provides gentle, proactive monitoring with positive messaging that reduces anxiety. Automatically adjusts system behavior to maintain smooth performance throughout long study sessions.

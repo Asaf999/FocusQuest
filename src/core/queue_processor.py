@@ -1,5 +1,5 @@
 """
-Queue processor for concurrent PDF processing with retry logic
+Queue processor for concurrent PDF processing with retry logic and resource monitoring
 """
 import time
 import threading
@@ -11,6 +11,7 @@ from pathlib import Path
 from src.core.processing_queue import ProcessingQueue, QueueItem
 from src.analysis.pdf_processor import PDFProcessor
 from src.analysis.claude_directory_analyzer import ClaudeDirectoryAnalyzer
+from src.core.resource_monitor import ResourceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,12 @@ class QueueProcessor:
         db_path: str = None,
         max_workers: int = 3,
         poll_interval: float = 5.0,
-        stale_timeout_minutes: int = 30
+        stale_timeout_minutes: int = 30,
+        enable_resource_monitoring: bool = True
     ):
         self.queue = ProcessingQueue(db_path=db_path)
         self.max_workers = max_workers
+        self._original_max_workers = max_workers  # Store original for recovery
         self.poll_interval = poll_interval
         self.stale_timeout_minutes = stale_timeout_minutes
         
@@ -34,6 +37,14 @@ class QueueProcessor:
         self.monitor_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         self.is_running = False
+        
+        # Resource monitoring
+        self.resource_monitor: Optional[ResourceMonitor] = None
+        if enable_resource_monitoring:
+            self.resource_monitor = ResourceMonitor(
+                check_interval=30.0,  # Check every 30 seconds
+                adhd_mode=True
+            )
         
         # Statistics
         self._stats_lock = threading.Lock()
@@ -49,18 +60,23 @@ class QueueProcessor:
         self._claude_analyzer = None
         
     def start(self):
-        """Start the queue processor"""
+        """Start the queue processor with resource monitoring"""
         if self.is_running:
             logger.warning("Queue processor already running")
             return
             
-        logger.info("Starting queue processor")
+        logger.info("Starting queue processor with ADHD-optimized resource monitoring")
         
         # Initialize processors if not already done
         if self._pdf_processor is None:
             self._pdf_processor = PDFProcessor()
         if self._claude_analyzer is None:
             self._claude_analyzer = ClaudeDirectoryAnalyzer()
+        
+        # Start resource monitoring
+        if self.resource_monitor:
+            self.resource_monitor.add_managed_component(self)
+            self.resource_monitor.start_monitoring()
         
         # Recover any stale items
         recovered = self.queue.recover_stale_items(self.stale_timeout_minutes)
@@ -77,7 +93,7 @@ class QueueProcessor:
         self.monitor_thread = threading.Thread(target=self._monitor_queue, daemon=True)
         self.monitor_thread.start()
         
-        logger.info(f"Queue processor started with {self.max_workers} workers")
+        logger.info(f"Queue processor started with {self.max_workers} workers and resource monitoring")
         
     def stop(self, timeout: float = 30.0):
         """Stop the queue processor gracefully"""
@@ -85,6 +101,12 @@ class QueueProcessor:
             return
             
         logger.info("Stopping queue processor")
+        
+        # Stop resource monitoring
+        if self.resource_monitor:
+            self.resource_monitor.remove_managed_component(self)
+            if len(self.resource_monitor.managed_components) == 0:
+                self.resource_monitor.stop_monitoring()
         
         # Signal stop
         self.stop_event.set()
@@ -117,6 +139,10 @@ class QueueProcessor:
                     item = self.queue.get_next_item()
                     if not item:
                         break
+                    
+                    # Check if we should adjust workers before processing this item
+                    if self.resource_monitor:
+                        self._check_preemptive_adjustment(item)
                         
                     logger.info(f"Processing {item.pdf_path} (priority: {item.priority})")
                     future = self.executor.submit(self._process_item, item)
@@ -243,7 +269,52 @@ class QueueProcessor:
         else:
             stats['average_processing_time'] = 0.0
             
+        # Add resource monitoring stats if available
+        if self.resource_monitor:
+            resource_stats = {
+                'memory_usage': self.resource_monitor.get_memory_usage(),
+                'cpu_usage': self.resource_monitor.get_cpu_usage(),
+                'disk_usage': self.resource_monitor.get_disk_usage(),
+                'process_info': self.resource_monitor.get_process_info(),
+                'alert_count': len(self.resource_monitor.get_alert_history(limit=10)),
+                'monitoring_performance': self.resource_monitor.get_monitoring_performance()
+            }
+            stats['resource_monitoring'] = resource_stats
+        
         return stats
+    
+    def _check_preemptive_adjustment(self, item: QueueItem):
+        """Check if we should preemptively adjust workers before processing an item."""
+        if not self.resource_monitor:
+            return
+            
+        # Estimate memory usage for this PDF
+        try:
+            # Try to get PDF page count for better estimation
+            pdf_path = Path(item.pdf_path)
+            if pdf_path.exists():
+                # Simple estimation based on file size
+                file_size_mb = pdf_path.stat().st_size / (1024 * 1024)
+                estimated_pages = max(1, int(file_size_mb / 0.5))  # Rough estimate: 0.5MB per page
+                
+                estimated_memory = self.resource_monitor.estimate_pdf_memory_usage(
+                    pages=estimated_pages,
+                    avg_page_size_kb=int(file_size_mb * 1024 / estimated_pages)
+                )
+                
+                # Check if we should reduce workers for this task
+                if self.resource_monitor.should_reduce_workers_for_task(estimated_memory):
+                    if self.max_workers > 1:
+                        old_workers = self.max_workers
+                        self.max_workers = max(1, self.max_workers - 1)
+                        logger.info(f"Preemptively reduced workers from {old_workers} to {self.max_workers} for large PDF")
+                        
+                        # Update executor if it exists
+                        if self.executor:
+                            self.executor._max_workers = self.max_workers
+                            
+        except Exception as e:
+            logger.debug(f"Error in preemptive adjustment: {e}")
         
     def add_pdf(self, pdf_path: str, priority=None) -> Optional[int]:
         """Add a PDF to the processing queue"""
