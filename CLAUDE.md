@@ -38,6 +38,10 @@
 - File watcher on /inbox
 - Automatic prompt generation
 - No user intervention during runtime
+- Uses Claude Code CLI (FREE with Pro) instead of API
+- Subprocess-based integration with `claude` command
+- CLAUDE_AUTO_ACCEPT=true for autonomous operation
+- No API costs - saves $45/month
 
 ## Project Overview
 FocusQuest is an ADHD-optimized math learning RPG designed for Tel Aviv University students. The system automatically processes Hebrew PDFs containing mathematical content, analyzes problems using Claude Code as a runtime AI engine, and presents them in a gamified, focus-friendly interface.
@@ -49,7 +53,7 @@ FocusQuest is an ADHD-optimized math learning RPG designed for Tel Aviv Universi
 - **PDF Processing**: pdfplumber + pytesseract
 - **Database**: SQLAlchemy
 - **Testing**: pytest
-- **AI Integration**: Claude Code API for problem analysis
+- **AI Integration**: Claude Code CLI for problem analysis (FREE with Pro subscription)
 
 ## Directory Structure
 ```
@@ -113,7 +117,7 @@ focusquest/
 
 ## Integration Points
 1. **PDF Watcher**: Monitors /inbox directory
-2. **Claude Code API**: Analyzes mathematical problems
+2. **Claude Code CLI**: Analyzes mathematical problems via subprocess (FREE)
 3. **Translation Service**: Hebrew → English pipeline
 4. **Formula Renderer**: LaTeX/MathML support
 
