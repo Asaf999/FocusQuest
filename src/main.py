@@ -79,7 +79,7 @@ class ProblemLoader(QThread):
         # First, try to get a problem that was skipped and is ready to return
         ready_skip = session.query(SkippedProblem).join(Problem).filter(
             SkippedProblem.return_after <= datetime.now(),
-            Problem.completed == False
+            True  # All problems are eligible
         ).order_by(SkippedProblem.skip_count.asc()).first()  # Return least skipped first
         
         if ready_skip:
@@ -93,8 +93,7 @@ class ProblemLoader(QThread):
         ).subquery()
         
         problem = session.query(Problem).filter(
-            Problem.completed == False,
-            ~Problem.id.in_(subquery)
+            ~Problem.id.in_(subquery)  # All problems are eligible except recently skipped
         ).order_by(Problem.difficulty).first()
         
         return problem
@@ -211,6 +210,23 @@ class FocusQuestApp:
         self.current_problem_id = problem_data['id']
         self.main_window.load_problem(problem_data)
         self._save_state()  # Save state after loading problem
+    
+    def _load_problem_by_id(self, problem_id: int):
+        """Load a specific problem by ID"""
+        try:
+            with self.db_manager.session_scope() as session:
+                problem = session.query(Problem).filter_by(id=problem_id).first()
+                if problem:
+                    problem_data = {
+                        'id': problem.id,
+                        'text': problem.text,
+                        'difficulty': problem.difficulty,
+                        'steps': problem.steps,
+                        'hints': problem.hints
+                    }
+                    self.on_problem_loaded(problem_data)
+        except Exception as e:
+            logger.error(f"Error loading problem {problem_id}: {e}")
         
     def on_problem_completed(self, problem_id: int):
         """Handle problem completion"""
@@ -472,12 +488,16 @@ class FocusQuestApp:
             if reply == QMessageBox.StandardButton.Yes:
                 self._restore_state(state)
             else:
-                self.state_file.unlink()
+                if self.state_file.exists():
+                    self.state_file.unlink()
                 
         except Exception as e:
             logger.error(f"Error checking crash recovery: {e}")
-            if self.state_file.exists():
-                self.state_file.unlink()
+            try:
+                if self.state_file.exists():
+                    self.state_file.unlink()
+            except:
+                pass
     
     def _restore_state(self, state):
         """Restore application state from saved data"""
@@ -500,6 +520,23 @@ class FocusQuestApp:
             
         except Exception as e:
             logger.error(f"Error restoring state: {e}")
+    
+    def _recover_session(self, state):
+        """Recover a previous session from state data"""
+        try:
+            # Restore problem if there was one active
+            if 'current_problem_id' in state and state['current_problem_id']:
+                self._load_problem_by_id(state['current_problem_id'])
+                
+                # Restore problem solving state if available
+                if hasattr(self.main_window, 'restore_problem_state'):
+                    self.main_window.restore_problem_state({
+                        'completed_steps': state.get('completed_steps', []),
+                        'current_step': state.get('current_step', 0),
+                        'elapsed_time': state.get('elapsed_time', 0)
+                    })
+        except Exception as e:
+            logger.error(f"Error recovering session: {e}")
     
     def _periodic_memory_cleanup(self):
         """Periodic memory cleanup to prevent leaks"""

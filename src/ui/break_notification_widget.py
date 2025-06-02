@@ -4,7 +4,7 @@ Provides gentle, non-intrusive break suggestions with clear action options.
 """
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                            QProgressBar, QFrame, QSpacerItem, QSizePolicy)
-from PyQt6.QtCore import QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect
+from PyQt6.QtCore import QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, Qt
 from PyQt6.QtGui import QFont, QPalette, QColor, QPixmap, QPainter, QLinearGradient
 import logging
 
@@ -29,7 +29,7 @@ class BreakNotificationWidget(QWidget):
         # Widget properties
         self.setWindowTitle("Break Time - FocusQuest")
         self.setFixedSize(400, 280)
-        self.setAttribute(self.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         
         # State tracking
         self.break_countdown = 0
@@ -176,7 +176,7 @@ class BreakNotificationWidget(QWidget):
         self.countdown_label = QLabel("Break ending in: 05:00")
         self.countdown_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self.countdown_label.setStyleSheet("color: #4A90A4; text-align: center;")
-        self.countdown_label.setAlignment(self.countdown_label.AlignmentFlag.AlignCenter)
+        self.countdown_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.end_break_btn = QPushButton("End Break Early ✨")
         self.end_break_btn.setFont(QFont("Arial", 11))

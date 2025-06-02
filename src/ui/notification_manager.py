@@ -119,7 +119,7 @@ class NotificationManager(QObject):
             self.tray_icon.setIcon(QIcon(str(icon_path)))
         else:
             # Fallback to app icon
-            self.tray_icon.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
+            self.tray_icon.setIcon(QApplication.instance().style().standardIcon(QApplication.instance().style().StandardPixmap.SP_ComputerIcon))
         
         # Create context menu
         menu = QMenu()

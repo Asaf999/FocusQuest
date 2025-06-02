@@ -79,8 +79,11 @@ class TestPanicButton:
         # Resume
         main_window.resume_from_panic()
         
+        # Wait for fade out animation to complete
+        qtbot.wait(400)  # Fade out animation is 300ms
+        
         # Verify overlay hidden
-        assert not main_window.panic_overlay.isVisible()
+        assert main_window.panic_overlay is None or not main_window.panic_overlay.isVisible()
         
         # Verify timers resumed
         main_window.problem_widget.resume_timer.assert_called_once()
@@ -110,7 +113,8 @@ class TestPanicButton:
         
         # Only clicking resume should exit
         qtbot.mouseClick(main_window.panic_overlay.resume_button, Qt.MouseButton.LeftButton)
-        assert not main_window.panic_overlay.isVisible()
+        qtbot.wait(400)  # Wait for fade out animation
+        assert main_window.panic_overlay is None or not main_window.panic_overlay.isVisible()
         
     def test_panic_mode_with_active_problem(self, main_window, qtbot):
         """Test panic mode during active problem solving."""
@@ -142,7 +146,8 @@ class TestPanicButton:
         
         # Resume
         main_window.resume_from_panic()
-        assert not main_window.panic_overlay.isVisible()
+        qtbot.wait(400)  # Wait for fade out animation
+        assert main_window.panic_overlay is None or not main_window.panic_overlay.isVisible()
         
         # Can trigger again after resume
         main_window.trigger_panic_mode()
