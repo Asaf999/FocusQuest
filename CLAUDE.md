@@ -17,6 +17,23 @@
 - Hebrew → English translation pipeline
 - SQLAlchemy for database
 
+## GitHub Workflow
+- After completing EACH phase or major feature:
+  1. Run all tests: `pytest tests/ -v`
+  2. Stage changes: `git add .`
+  3. Commit with descriptive message:
+     ```bash
+     git commit -m "Phase X complete: [specific accomplishments]
+     
+     - List specific features implemented
+     - Note test coverage added
+     - Document any architecture decisions"
+     ```
+  4. Push to GitHub: `git push origin main`
+  5. Update MASTER_PLAN.md progress before moving to next phase
+- NEVER proceed to next phase without committing current work
+- Each commit should be a working state with passing tests
+
 ## Claude Code Runtime Integration
 - File watcher on /inbox
 - Automatic prompt generation
