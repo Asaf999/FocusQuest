@@ -94,13 +94,15 @@ class TestFileWatcherConcurrency:
         """Test that the processing queue is thread-safe."""
         from src.core.processing_queue import ProcessingQueue
         
-        # Create processing queue
-        pq = ProcessingQueue(":memory:")  # In-memory SQLite for testing
+        # Create processing queue with temp file (not :memory: which is connection-specific)
+        import tempfile
+        temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        pq = ProcessingQueue(temp_db.name)
         
         # Add items from multiple threads
         def add_items(start_id):
             for i in range(100):
-                pq.add_item(f"test_{start_id}_{i}.pdf", priority="NORMAL")
+                pq.add_item(f"test_{start_id}_{i}.pdf", priority=1)  # Use integer priority
         
         threads = []
         for i in range(5):
@@ -118,9 +120,13 @@ class TestFileWatcherConcurrency:
             if item is None:
                 break
             items.append(item)
-            pq.mark_completed(item['id'])
+            pq.mark_completed(item.id)  # Use attribute access, not subscript
         
         assert len(items) == 500, f"Expected 500 items, got {len(items)}"
+        
+        # Cleanup
+        import os
+        os.unlink(temp_db.name)
     
     def test_file_move_atomicity(self, temp_inbox):
         """Test that file moves are atomic and thread-safe."""

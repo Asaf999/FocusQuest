@@ -7,6 +7,8 @@ import shutil
 import time
 import threading
 import queue
+import errno
+from contextlib import contextmanager
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -32,6 +34,12 @@ class PDFHandler(FileSystemEventHandler):
         self.processing_lock = threading.Lock()
         self.active_files = set()  # Track files being processed
         
+        # Additional locks for thread safety
+        self.file_operation_lock = threading.Lock()
+        self._processor = None
+        self._analyzer = None
+        self._resource_lock = threading.Lock()
+        
         # Start worker thread for processing
         self.worker_thread = threading.Thread(target=self._process_events, daemon=True)
         self.worker_thread.start()
@@ -53,7 +61,7 @@ class PDFHandler(FileSystemEventHandler):
             self.event_queue.put(('moved', event.dest_path))
     
     def _process_events(self):
-        """Worker thread to process events from queue"""
+        """Worker thread to process events from queue with enhanced thread safety"""
         while True:
             try:
                 event_type, file_path = self.event_queue.get(timeout=1.0)
@@ -61,15 +69,33 @@ class PDFHandler(FileSystemEventHandler):
                 # Wait for file to be fully written
                 time.sleep(1)
                 
-                # Check if file is already being processed
+                pdf_path = Path(file_path)
+                
+                # Extended lock coverage for entire processing decision
                 with self.processing_lock:
+                    # Check if file is already being processed
                     if file_path in self.active_files:
                         logger.info(f"File already being processed: {file_path}")
                         continue
+                    
+                    # Verify file still exists before processing
+                    if not pdf_path.exists():
+                        logger.warning(f"File no longer exists: {pdf_path}")
+                        continue
+                    
+                    # Verify it's a PDF
+                    if pdf_path.suffix.lower() != '.pdf':
+                        logger.debug(f"Skipping non-PDF file: {pdf_path}")
+                        continue
+                    
+                    # Mark as active
                     self.active_files.add(file_path)
                 
                 try:
                     self._process_pdf_safe(file_path)
+                except Exception as e:
+                    logger.error(f"Error processing {file_path}: {e}")
+                    print(f"❌ Error processing {pdf_path.name}: {e}")
                 finally:
                     # Remove from active files
                     with self.processing_lock:
@@ -80,6 +106,22 @@ class PDFHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.error(f"Error in event processing thread: {e}")
             
+    def _get_processor(self):
+        """Get or create thread-safe PDF processor"""
+        if self._processor is None:
+            with self._resource_lock:
+                if self._processor is None:
+                    self._processor = PDFProcessor()
+        return self._processor
+    
+    def _get_analyzer(self):
+        """Get or create thread-safe Claude analyzer"""
+        if self._analyzer is None:
+            with self._resource_lock:
+                if self._analyzer is None:
+                    self._analyzer = ClaudeDirectoryAnalyzer()
+        return self._analyzer
+    
     def _process_pdf_safe(self, pdf_path: str):
         """Thread-safe PDF processing"""
         if self.processing_queue:
@@ -91,12 +133,12 @@ class PDFHandler(FileSystemEventHandler):
             self.process_pdf(pdf_path)
     
     def process_pdf(self, pdf_path: str):
-        """Process a PDF file using Claude Directory Analyzer"""
+        """Process a PDF file using Claude Directory Analyzer with thread safety"""
         pdf_path = Path(pdf_path)
         
-        # Initialize processors lazily to avoid thread issues
-        processor = PDFProcessor()
-        analyzer = ClaudeDirectoryAnalyzer()
+        # Get thread-safe processor instances
+        processor = self._get_processor()
+        analyzer = self._get_analyzer()
         
         if not pdf_path.exists():
             logger.warning(f"PDF no longer exists: {pdf_path}")
@@ -165,33 +207,57 @@ class PDFHandler(FileSystemEventHandler):
             print(f"❌ Error processing PDF: {e}")
             return []
             
-    def _move_to_processed(self, pdf_path: Path):
-        """Move PDF to processed directory with timestamp (thread-safe)"""
+    def _move_to_processed(self, pdf_path: Path, max_retries: int = 3):
+        """Move PDF to processed directory with thread-safe atomic operations"""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        new_name = f"{timestamp}_{pdf_path.name}"
+        # Add thread ID to ensure uniqueness in concurrent scenarios
+        thread_id = threading.current_thread().ident % 1000
+        new_name = f"{timestamp}_{thread_id:03d}_{pdf_path.name}"
         dest_path = self.processed_dir / new_name
         
-        # Use atomic rename operation
-        try:
-            # Ensure source still exists (race condition check)
-            if not pdf_path.exists():
-                logger.warning(f"Source file no longer exists: {pdf_path}")
-                return
-                
-            # Use rename for atomic operation on same filesystem
-            pdf_path.rename(dest_path)
-            print(f"📁 Moved to processed: {new_name}")
-        except FileNotFoundError:
-            logger.warning(f"File already moved: {pdf_path}")
-        except OSError:
-            # Different filesystem, use copy+delete
-            try:
-                shutil.copy2(str(pdf_path), str(dest_path))
-                pdf_path.unlink()
-                print(f"📁 Moved to processed: {new_name}")
-            except Exception as e:
-                logger.error(f"Error moving file: {e}")
-                print(f"⚠️ Could not move file: {e}")
+        # Use file operation lock to prevent concurrent moves
+        with self.file_operation_lock:
+            for attempt in range(max_retries):
+                try:
+                    # Double-check source exists
+                    if not pdf_path.exists():
+                        logger.info(f"File already processed: {pdf_path}")
+                        return
+                    
+                    # Ensure destination doesn't exist
+                    if dest_path.exists():
+                        # Generate new unique name
+                        counter = 1
+                        while dest_path.exists():
+                            new_name = f"{timestamp}_{thread_id:03d}_{counter}_{pdf_path.name}"
+                            dest_path = self.processed_dir / new_name
+                            counter += 1
+                    
+                    # Try atomic rename first
+                    try:
+                        pdf_path.rename(dest_path)
+                        print(f"📁 Moved to processed: {new_name}")
+                        return
+                    except OSError as e:
+                        if e.errno == errno.EXDEV:
+                            # Cross-device move, use copy+delete
+                            shutil.copy2(str(pdf_path), str(dest_path))
+                            pdf_path.unlink()
+                            print(f"📁 Moved to processed: {new_name}")
+                            return
+                        else:
+                            raise
+                            
+                except FileNotFoundError:
+                    logger.info(f"File already moved by another thread: {pdf_path}")
+                    return
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Retry {attempt + 1}/{max_retries} for moving {pdf_path}: {e}")
+                        time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    else:
+                        logger.error(f"Failed to move file after {max_retries} attempts: {e}")
+                        print(f"⚠️ Could not move file: {e}")
 
 
 class FileWatcher:
@@ -231,7 +297,13 @@ class FileWatcher:
         self.running = False
         self.observer.stop()
         print("\n👋 File watcher stopped")
-        self.observer.join()
+        self.observer.join(timeout=5.0)
+        
+        # Cleanup handler resources
+        if hasattr(self.handler, '_processor'):
+            self.handler._processor = None
+        if hasattr(self.handler, '_analyzer'):
+            self.handler._analyzer = None
         
     def process_existing_files(self):
         """Process any existing PDF files in inbox"""
