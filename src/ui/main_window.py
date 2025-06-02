@@ -21,6 +21,8 @@ class FocusQuestWindow(QMainWindow):
     problem_completed = pyqtSignal(int)  # Problem ID
     session_paused = pyqtSignal()
     focus_mode_toggled = pyqtSignal(bool)
+    panic_mode_started = pyqtSignal()
+    panic_mode_ended = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -225,6 +227,7 @@ class FocusQuestWindow(QMainWindow):
             return  # Already in panic mode
             
         self.panic_mode = True
+        self.panic_mode_started.emit()
         
         # Save current state
         if self.problem_widget:
@@ -361,6 +364,7 @@ class FocusQuestWindow(QMainWindow):
             self.panic_overlay = None
         
         self.panic_mode = False
+        self.panic_mode_ended.emit()
         
         # Resume timers
         if self.problem_widget and hasattr(self.problem_widget, 'resume_timer'):

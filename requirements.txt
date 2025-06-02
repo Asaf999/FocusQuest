@@ -16,6 +16,7 @@ watchdog>=3.0.0
 
 # Utilities
 psutil>=5.9.0  # For memory monitoring
+plyer>=2.1.0   # Cross-platform notifications
 
 # Testing dependencies
 pytest>=7.4.0

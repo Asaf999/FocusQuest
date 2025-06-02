@@ -5,13 +5,18 @@ Main application entry point
 import sys
 import gc
 import logging
+import signal
+import atexit
+import json
+from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon
 
 from src.ui.main_window import FocusQuestWindow
 from src.ui.session_manager import SessionManager
+from src.ui.notification_manager import NotificationManager
 from src.database.db_manager import DatabaseManager
 from src.database.models import Problem, UserProgress
 
@@ -95,6 +100,7 @@ class FocusQuestApp:
         self.session_manager = SessionManager()
         self.main_window = FocusQuestWindow()
         self.problem_loader = ProblemLoader(self.db_manager)
+        self.notification_manager = NotificationManager()
         
         # Override window close event
         self.main_window.closeEvent = self._on_window_close
@@ -129,7 +135,17 @@ class FocusQuestApp:
         
         # Session management
         self.main_window.session_paused.connect(self.session_manager.pause_session)
-        self.session_manager.break_suggested.connect(self.on_break_suggested)
+        self.session_manager.break_suggested.connect(self.notification_manager.show_break_suggestion)
+        
+        # Notification management
+        self.notification_manager.break_taken.connect(self.on_break_taken)
+        self.notification_manager.break_postponed.connect(self.on_break_postponed)
+        self.notification_manager.achievement_unlocked.connect(self.on_achievement_unlocked)
+        self.notification_manager.settings_requested.connect(self.on_notification_settings_requested)
+        
+        # Panic mode integration
+        self.main_window.panic_mode_started.connect(lambda: self.notification_manager.set_panic_mode(True))
+        self.main_window.panic_mode_ended.connect(lambda: self.notification_manager.set_panic_mode(False))
         
         # XP updates
         self.main_window.xp_widget.level_up.connect(self.on_level_up)
@@ -200,20 +216,51 @@ class FocusQuestApp:
             logger.error(f"Error completing problem: {e}")
             self.on_error(str(e))
             
-    def on_break_suggested(self):
-        """Handle break suggestion"""
-        reply = QMessageBox.question(
-            self.main_window,
-            "Time for a Break!",
-            "You've been studying for 25 minutes.\n"
-            "Taking a 5-minute break helps maintain focus.\n\n"
-            "Would you like to take a break now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+    def on_break_taken(self, duration_minutes: int):
+        """Handle when user takes a break."""
+        logger.info(f"User taking {duration_minutes} minute break")
         
-        if reply == QMessageBox.StandardButton.Yes:
-            self.session_manager.pause_session()
-            # Could show a break timer here
+        # Pause session
+        self.session_manager.pause_session()
+        
+        # Auto-resume after break (with some buffer time)
+        resume_delay = (duration_minutes + 1) * 60 * 1000  # +1 minute buffer, convert to ms
+        QTimer.singleShot(resume_delay, self.session_manager.resume_session)
+        
+    def on_break_postponed(self, postpone_minutes: int):
+        """Handle when user postpones break."""
+        logger.info(f"Break postponed for {postpone_minutes} minutes")
+        
+        # Update notification manager with postponement
+        # This could trigger a gentler reminder later
+        
+    def on_achievement_unlocked(self, achievement_name: str, xp_gained: int):
+        """Handle achievement unlocks from break-taking."""
+        logger.info(f"Achievement unlocked: {achievement_name} (+{xp_gained} XP)")
+        
+        # Update user progress in database
+        try:
+            with self.db_manager.session_scope() as session:
+                user = session.query(UserProgress).first()
+                if user:
+                    user.total_xp += xp_gained
+                    # Could also add achievement tracking here
+                    session.commit()
+                    
+                    # Update UI
+                    self.main_window.update_user_progress(
+                        user.total_xp,
+                        user.current_level,
+                        user.current_streak
+                    )
+        except Exception as e:
+            logger.error(f"Error updating achievement XP: {e}")
+            
+    def on_notification_settings_requested(self):
+        """Handle notification settings request."""
+        # This could open a settings dialog
+        # For now, just log the request
+        logger.info("Notification settings requested - placeholder for settings dialog")
             
     def on_level_up(self, new_level: int):
         """Handle level up event"""
