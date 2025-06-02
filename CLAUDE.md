@@ -168,3 +168,18 @@ When in autonomous mode:
 - Use "think" for basic implementation decisions
 - Use "think hard" for architectural choices
 - Use "ultrathink" for complex mathematical analysis and ADHD optimizations
+
+## Phase 6.5: Ultrathink Analysis Protocol
+When executing Phase 6.5:
+1. Use ultrathink (31,999 tokens) for all analysis
+2. Follow research → analyze → recommend → implement
+3. Focus on ADHD user experience above all
+4. Document all findings in analysis_report.md
+5. Create issues for post-launch improvements
+6. Validate every component before integration
+
+## Session Continuity
+When starting a new Claude Code session:
+1. **ALWAYS** read `current_phase.md` first to understand where we left off
+2. Update `current_phase.md` at the end of each session
+3. This ensures seamless continuation across sessions
