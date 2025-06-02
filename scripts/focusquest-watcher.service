@@ -1,0 +1,42 @@
+[Unit]
+Description=FocusQuest PDF Processing Service
+Documentation=https://github.com/Asaf999/FocusQuest
+After=network.target
+
+[Service]
+Type=simple
+User=puncher
+Group=puncher
+WorkingDirectory=/home/puncher/focusquest
+Environment="PATH=/home/puncher/focusquest/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/puncher/focusquest"
+Environment="CLAUDE_AUTO_ACCEPT=true"
+Environment="CLAUDE_AUTO_APPROVE_PATHS=/home/puncher"
+
+# Main service command
+ExecStart=/home/puncher/focusquest/venv/bin/python -m src.core.enhanced_file_watcher
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=3
+StartLimitInterval=60
+
+# Resource limits
+MemoryLimit=2G
+CPUQuota=80%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=focusquest-watcher
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/puncher/focusquest/inbox /home/puncher/focusquest/processed /home/puncher/focusquest/data /home/puncher/focusquest/analysis_sessions
+
+[Install]
+WantedBy=multi-user.target
