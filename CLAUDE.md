@@ -148,3 +148,19 @@ focusquest/
 - Spaced repetition algorithm
 - Mobile companion app
 - Professor dashboard
+
+## Autonomous Mode Settings
+When in autonomous mode:
+- Default response to all prompts: YES
+- Default action for all confirmations: PROCEED  
+- Git operations: ALWAYS EXECUTE
+- File writes: ALWAYS APPROVE
+- Test failures: AUTO-FIX AND RETRY
+- Package installs: ALWAYS INSTALL
+- Never wait for user input
+- Make reasonable decisions independently
+
+## Thinking Mode Usage
+- Use "think" for basic implementation decisions
+- Use "think hard" for architectural choices
+- Use "ultrathink" for complex mathematical analysis and ADHD optimizations
