@@ -101,4 +101,4 @@ temp/
 *.key
 *.pem
 secrets/
-config/secrets.json
+config/secrets.jsonanalysis_sessions/
