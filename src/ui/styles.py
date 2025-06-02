@@ -127,6 +127,23 @@ QPushButton#hintButton:hover {
     background-color: #ffa726;
 }
 
+/* Skip button styling - ADHD-friendly colors */
+QPushButton#skipButton {
+    background-color: #8e24aa;
+    color: white;
+    border: 2px solid #7b1fa2;
+    font-weight: 500;
+}
+
+QPushButton#skipButton:hover {
+    background-color: #9c27b0;
+    border-color: #8e24aa;
+}
+
+QPushButton#skipButton:pressed {
+    background-color: #7b1fa2;
+}
+
 /* Checkboxes */
 QCheckBox {
     color: #e0e0e0;

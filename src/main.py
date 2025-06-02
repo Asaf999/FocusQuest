@@ -18,7 +18,7 @@ from src.ui.main_window import FocusQuestWindow
 from src.ui.session_manager import SessionManager
 from src.ui.notification_manager import NotificationManager
 from src.database.db_manager import DatabaseManager
-from src.database.models import Problem, UserProgress
+from src.database.models import Problem, UserProgress, ProblemAttempt, SkippedProblem
 
 # Configure logging
 logging.basicConfig(
@@ -39,13 +39,11 @@ class ProblemLoader(QThread):
         self.db_manager = db_manager
         
     def run(self):
-        """Load next problem from database"""
+        """Load next problem from database excluding recently skipped ones"""
         try:
-            # Get next unsolved problem
+            # Get next unsolved problem excluding recently skipped
             with self.db_manager.session_scope() as session:
-                problem = session.query(Problem).filter(
-                    Problem.completed == False
-                ).order_by(Problem.difficulty).first()
+                problem = self._get_next_problem_excluding_recent_skips(session)
                 
                 if problem:
                     # Convert to dict for GUI
@@ -75,6 +73,31 @@ class ProblemLoader(QThread):
         except Exception as e:
             logger.error(f"Error loading problem: {e}")
             self.error_occurred.emit(str(e))
+            
+    def _get_next_problem_excluding_recent_skips(self, session):
+        """Get next problem while excluding recently skipped ones."""
+        # First, try to get a problem that was skipped and is ready to return
+        ready_skip = session.query(SkippedProblem).join(Problem).filter(
+            SkippedProblem.return_after <= datetime.now(),
+            Problem.completed == False
+        ).order_by(SkippedProblem.skip_count.asc()).first()  # Return least skipped first
+        
+        if ready_skip:
+            # Remove from skip queue since we're returning it
+            session.delete(ready_skip)
+            return ready_skip.problem
+            
+        # Otherwise, get next unsolved problem that hasn't been recently skipped
+        subquery = session.query(SkippedProblem.problem_id).filter(
+            SkippedProblem.return_after > datetime.now()
+        ).subquery()
+        
+        problem = session.query(Problem).filter(
+            Problem.completed == False,
+            ~Problem.id.in_(subquery)
+        ).order_by(Problem.difficulty).first()
+        
+        return problem
 
 
 class FocusQuestApp:
@@ -132,6 +155,7 @@ class FocusQuestApp:
         
         # Problem completion
         self.main_window.problem_completed.connect(self.on_problem_completed)
+        self.main_window.problem_skipped.connect(self.on_problem_skipped)
         
         # Session management
         self.main_window.session_paused.connect(self.session_manager.pause_session)
@@ -261,6 +285,89 @@ class FocusQuestApp:
         # This could open a settings dialog
         # For now, just log the request
         logger.info("Notification settings requested - placeholder for settings dialog")
+        
+    def on_problem_skipped(self, problem_id: int):
+        """Handle when user skips a problem."""
+        logger.info(f"Problem {problem_id} skipped strategically")
+        
+        try:
+            with self.db_manager.session_scope() as session:
+                # Create or update skipped problem record
+                existing_skip = session.query(SkippedProblem).filter_by(
+                    user_id=1,  # TODO: Get actual user ID
+                    problem_id=problem_id
+                ).first()
+                
+                if existing_skip:
+                    # Increment skip count and update timestamp
+                    existing_skip.skip_count += 1
+                    existing_skip.skipped_at = datetime.now()
+                    existing_skip.calculate_return_time()
+                    skip_record = existing_skip
+                else:
+                    # Create new skip record
+                    skip_record = SkippedProblem(
+                        user_id=1,  # TODO: Get actual user ID
+                        problem_id=problem_id,
+                        reason='user_skip'
+                    )
+                    skip_record.calculate_return_time()
+                    session.add(skip_record)
+                
+                # Create attempt record marking it as skipped
+                attempt = ProblemAttempt(
+                    user_id=1,  # TODO: Get actual user ID
+                    problem_id=problem_id,
+                    session_id=getattr(self.session_manager, 'current_session_id', None),
+                    started_at=datetime.now(),
+                    completed_at=datetime.now(),
+                    completed=False,
+                    success=False,
+                    skipped=True,
+                    skipped_at=datetime.now(),
+                    skip_reason='user_skip',
+                    time_spent_seconds=0,  # Could track actual time
+                    hints_used=0,
+                    xp_earned=5  # Small XP reward for self-awareness
+                )
+                session.add(attempt)
+                
+                # Award small XP for strategic skipping
+                user = session.query(UserProgress).first()
+                if user:
+                    user.total_xp += 5  # Small positive reinforcement
+                    
+                session.commit()
+                
+                # Update UI
+                if user:
+                    self.main_window.update_user_progress(
+                        user.total_xp,
+                        user.current_level,
+                        user.current_streak
+                    )
+                
+                # Record skip in session
+                self.session_manager.record_problem_skipped()
+                
+                # Load next problem
+                QTimer.singleShot(1000, self.load_next_problem)  # Brief delay
+                
+                # Check for skip achievement
+                self._check_skip_achievement(skip_record.skip_count)
+                
+        except Exception as e:
+            logger.error(f"Error handling problem skip: {e}")
+            self.on_error(str(e))
+            
+    def _check_skip_achievement(self, total_skips: int):
+        """Check if user has unlocked skip-related achievements."""
+        if total_skips == 5:
+            # First skip milestone
+            self.notification_manager.achievement_unlocked.emit("Strategic Learner", 25)
+        elif total_skips == 15:
+            # Advanced skip milestone
+            self.notification_manager.achievement_unlocked.emit("ADHD Self-Advocate", 50)
             
     def on_level_up(self, new_level: int):
         """Handle level up event"""

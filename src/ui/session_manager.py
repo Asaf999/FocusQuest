@@ -22,6 +22,7 @@ class SessionManager(QObject):
         self.session_start_time: Optional[datetime] = None
         self.session_time = 0  # Seconds
         self.problems_completed = 0
+        self.problems_skipped = 0  # Track strategic skips
         self.xp_earned = 0
         
     def start_session(self):
@@ -29,6 +30,7 @@ class SessionManager(QObject):
         self.session_start_time = datetime.now()
         self.session_time = 0
         self.problems_completed = 0
+        self.problems_skipped = 0
         self.xp_earned = 0
         self.session_timer.start(1000)  # Check every second
         self.session_started.emit()
@@ -74,6 +76,10 @@ class SessionManager(QObject):
     def record_problem_completed(self):
         """Record that a problem was completed"""
         self.problems_completed += 1
+        
+    def record_problem_skipped(self):
+        """Record that a problem was strategically skipped"""
+        self.problems_skipped += 1
         
     def record_xp_earned(self, amount: int):
         """Record XP earned in session"""

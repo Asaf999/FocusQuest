@@ -19,6 +19,7 @@ class FocusQuestWindow(QMainWindow):
     
     # Signals
     problem_completed = pyqtSignal(int)  # Problem ID
+    problem_skipped = pyqtSignal(int)  # Problem ID
     session_paused = pyqtSignal()
     focus_mode_toggled = pyqtSignal(bool)
     panic_mode_started = pyqtSignal()
@@ -76,6 +77,14 @@ class FocusQuestWindow(QMainWindow):
         self.hint_button.clicked.connect(self.show_hint)
         action_layout.addWidget(self.hint_button)
         
+        # Skip button
+        self.skip_button = QPushButton("⏭️ Skip for now")
+        self.skip_button.setObjectName("skipButton")
+        self.skip_button.setMinimumHeight(40)
+        self.skip_button.setToolTip("Take a strategic break from this problem - it will return when you're ready")
+        self.skip_button.clicked.connect(self.skip_problem)
+        action_layout.addWidget(self.skip_button)
+        
         action_layout.addStretch()
         
         # Submit button
@@ -120,6 +129,12 @@ class FocusQuestWindow(QMainWindow):
         self.panic_action.setShortcut(QKeySequence("Ctrl+P"))
         self.panic_action.triggered.connect(self.trigger_panic_mode)
         self.addAction(self.panic_action)
+        
+        # Skip problem (S key)
+        self.skip_action = QAction("Skip Problem", self)
+        self.skip_action.setShortcut(QKeySequence("S"))
+        self.skip_action.triggered.connect(self.skip_problem)
+        self.addAction(self.skip_action)
         
         # Focus mode (F)
         focus_shortcut = QShortcut(QKeySequence("F"), self)
@@ -182,6 +197,72 @@ class FocusQuestWindow(QMainWindow):
         """Submit current answer"""
         if self.problem_widget:
             self.problem_widget.submit_current_step()
+            
+    def skip_problem(self):
+        """Skip current problem with ADHD-friendly confirmation"""
+        if not self.current_problem:
+            return
+            
+        # Show ADHD-friendly confirmation dialog
+        if self.show_skip_confirmation():
+            problem_id = self.current_problem.get('id')
+            if problem_id:
+                self.problem_skipped.emit(problem_id)
+                
+    def show_skip_confirmation(self) -> bool:
+        """Show ADHD-friendly skip confirmation dialog"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Strategic Learning Break")
+        msg.setIcon(QMessageBox.Icon.Information)
+        
+        # ADHD-friendly messaging
+        msg.setText(
+            "Taking a strategic break from this problem! 🧠\n\n"
+            "Sometimes stepping back helps our ADHD brains process better.\n"
+            "This problem will return when you're ready for it."
+        )
+        
+        # Custom button text
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
+        )
+        
+        ok_button = msg.button(QMessageBox.StandardButton.Ok)
+        ok_button.setText("Skip for now ⏭️")
+        
+        cancel_button = msg.button(QMessageBox.StandardButton.Cancel)
+        cancel_button.setText("Keep trying 💪")
+        
+        # Make it ADHD-friendly with positive colors
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #F0F8FB;
+                border: 2px solid #B8D4DA;
+                border-radius: 10px;
+            }
+            QMessageBox QLabel {
+                color: #2C5F71;
+                font-size: 13px;
+                padding: 10px;
+            }
+            QPushButton {
+                background-color: #E3F2FD;
+                border: 2px solid #90CAF9;
+                border-radius: 6px;
+                padding: 8px 16px;
+                color: #1565C0;
+                font-weight: 500;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #BBDEFB;
+            }
+        """)
+        
+        result = msg.exec()
+        return result == QMessageBox.StandardButton.Ok
             
     def pause_session(self):
         """Pause the current session"""

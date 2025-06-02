@@ -240,6 +240,9 @@ class ProblemAttempt(Base):
     time_spent_seconds = Column(Integer)
     hints_used = Column(Integer, default=0)
     xp_earned = Column(Integer, default=0)
+    skipped = Column(Boolean, default=False)
+    skipped_at = Column(DateTime)
+    skip_reason = Column(String(100))  # 'user_skip', 'auto_defer', etc.
     
     # Relationships
     user = relationship("User", back_populates="attempts")
@@ -255,3 +258,49 @@ class ProblemAttempt(Base):
         self.time_spent_seconds = int(time_spent.total_seconds())
         self.hints_used = hints_used
         self.xp_earned = xp_earned
+
+
+class SkippedProblem(Base):
+    """Track problems that users have strategically skipped"""
+    __tablename__ = 'skipped_problems'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    problem_id = Column(Integer, ForeignKey('problems.id'), nullable=False)
+    skipped_at = Column(DateTime, default=func.now())
+    return_after = Column(DateTime)  # When it can return to queue
+    skip_count = Column(Integer, default=1)
+    last_attempt_id = Column(Integer, ForeignKey('problem_attempts.id'))
+    reason = Column(String(100), default='user_skip')  # user_skip, auto_defer, etc.
+    
+    # Relationships
+    user = relationship("User")
+    problem = relationship("Problem")
+    last_attempt = relationship("ProblemAttempt")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'problem_id', name='unique_user_skipped_problem'),
+    )
+    
+    def calculate_return_time(self):
+        """Calculate when this problem should return based on skip count"""
+        # Spaced repetition intervals: 2h, 8h, 1d, 3d, 1w
+        intervals = [
+            timedelta(hours=2),      # First skip: 2 hours
+            timedelta(hours=8),      # Second skip: 8 hours  
+            timedelta(days=1),       # Third skip: 1 day
+            timedelta(days=3),       # Fourth skip: 3 days
+            timedelta(weeks=1),      # Fifth+ skip: 1 week
+        ]
+        
+        # Use the appropriate interval based on skip count
+        interval_index = min(self.skip_count - 1, len(intervals) - 1)
+        interval = intervals[interval_index]
+        
+        self.return_after = self.skipped_at + interval
+        
+    def is_ready_to_return(self) -> bool:
+        """Check if enough time has passed for this problem to return"""
+        if not self.return_after:
+            self.calculate_return_time()
+        return datetime.now() >= self.return_after

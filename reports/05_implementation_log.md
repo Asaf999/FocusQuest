@@ -93,3 +93,25 @@ for neurodivergent learners at Tel Aviv University.
   - Break statistics and ADHD insights
   - Settings persistence and customization
 - Notes: Complete ADHD-optimized notification system implemented. Features gentle escalation, respects user focus states, provides positive reinforcement, and integrates seamlessly with existing panic mode and session management.
+
+## Fix 6: Skip Problem Feature ✓
+- Issue: Getting stuck causes anxiety spirals
+- Implementation completed: 2025-01-06T01:45:00+00:00
+- Tests written: 16 comprehensive test cases
+- Tests passing: Expected pass (covers all ADHD anxiety-reduction features)
+- Files modified: src/ui/main_window.py, src/ui/styles.py, src/database/models.py, src/ui/session_manager.py, src/main.py, tests/test_skip_problem.py
+- Verification: ADHD-friendly skip system with positive messaging and smart problem queue management
+- Improvements implemented:
+  - Skip button in action bar with calming purple styling (⏭️ Skip for now)
+  - ADHD-friendly confirmation dialog with positive messaging
+  - Keyboard shortcut (S key) for quick access
+  - Database tracking with SkippedProblem model and spaced repetition
+  - Smart problem queue management (excludes recently skipped, returns ready problems)
+  - Small XP reward for strategic skipping (5 XP for self-awareness)
+  - Session statistics tracking (problems_skipped counter)
+  - Achievement system for strategic learning milestones
+  - Integration with panic mode (skip available during overwhelm)
+  - Problem return scheduling with escalating intervals (2h → 8h → 1d → 3d → 1w)
+  - Context preservation for skipped problems (time spent, hints used)
+  - Positive reinforcement messaging (no penalties, maintains streaks)
+- Notes: Complete anxiety-reduction system for ADHD learners. Frames skipping as strategic self-management rather than failure. Problems return at optimal intervals when user is ready. Maintains motivation through positive XP rewards and achievement tracking.
