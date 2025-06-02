@@ -6,7 +6,6 @@ import pytest
 import json
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, time
-import asyncio
 
 from src.analysis.claude_analyzer import (
     ClaudeAnalyzer, ProblemAnalysis, StepBreakdown,
@@ -20,7 +19,7 @@ class TestClaudeAnalyzer:
     @pytest.fixture
     def analyzer(self):
         """Create analyzer instance"""
-        return ClaudeAnalyzer(api_key="test_key")
+        return ClaudeAnalyzer(claude_cmd="echo")
     
     @pytest.fixture
     def sample_problem(self):
@@ -45,7 +44,7 @@ class TestClaudeAnalyzer:
     
     def test_generates_3_to_7_steps(self, analyzer, sample_problem):
         """Test that analyzer generates appropriate number of steps"""
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [
                 {
                     'number': 1,
@@ -78,9 +77,9 @@ class TestClaudeAnalyzer:
                     'checkpoint_question': 'Can you combine using the product rule?'
                 }
             ]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem)
             
             assert isinstance(analysis, ProblemAnalysis)
@@ -89,15 +88,15 @@ class TestClaudeAnalyzer:
     
     def test_adhd_friendly_step_duration(self, analyzer, sample_problem, adhd_profile):
         """Test that step durations are ADHD-appropriate"""
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [
                 {'number': 1, 'description': 'Step 1', 'duration_minutes': 5},
                 {'number': 2, 'description': 'Step 2', 'duration_minutes': 7},
                 {'number': 3, 'description': 'Step 3', 'duration_minutes': 3},
             ]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem, adhd_profile)
             
             # All steps should be 3-10 minutes
@@ -110,7 +109,7 @@ class TestClaudeAnalyzer:
     
     def test_socratic_hint_generation(self, analyzer, sample_problem):
         """Test generation of 3-tier Socratic hints"""
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [{
                 'number': 1,
                 'description': 'Apply product rule',
@@ -121,9 +120,9 @@ class TestClaudeAnalyzer:
                     'tier3': 'Here u = sin(x) and v = cos(x). So f\'(x) = cos(x)·cos(x) + sin(x)·(-sin(x))'
                 }
             }]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem)
             
             hints = analysis.steps[0].hints
@@ -137,7 +136,7 @@ class TestClaudeAnalyzer:
     
     def test_checkpoint_questions(self, analyzer, sample_problem):
         """Test that each step has a checkpoint question"""
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [
                 {
                     'number': 1,
@@ -152,9 +151,9 @@ class TestClaudeAnalyzer:
                     'checkpoint_question': 'What is the derivative of sin(x)cos(x)?'
                 }
             ]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem)
             
             for step in analysis.steps:
@@ -164,7 +163,7 @@ class TestClaudeAnalyzer:
     
     def test_json_response_parsing(self, analyzer):
         """Test parsing of Claude's JSON responses"""
-        valid_json = {
+        valid_json = json.dumps({
             'analysis': {
                 'problem_type': 'derivative',
                 'difficulty_rating': 3,
@@ -185,7 +184,7 @@ class TestClaudeAnalyzer:
                 }
             ],
             'summary': 'Apply product rule to find derivative'
-        }
+        })
         
         analysis = analyzer._parse_response(valid_json)
         
@@ -196,13 +195,9 @@ class TestClaudeAnalyzer:
         assert len(analysis.steps) == 1
     
     def test_timeout_handling(self, analyzer, sample_problem):
-        """Test handling of API timeouts"""
+        """Test handling of CLI timeouts"""
         
-        async def mock_timeout():
-            await asyncio.sleep(0.1)
-            raise asyncio.TimeoutError()
-        
-        with patch.object(analyzer, '_call_claude_api', side_effect=mock_timeout):
+        with patch.object(analyzer, '_run_claude_cli', side_effect=AnalysisError("Claude CLI timeout after 30 seconds")):
             with pytest.raises(AnalysisError) as exc_info:
                 analyzer.analyze_problem(sample_problem, timeout=0.05)
             
@@ -217,9 +212,9 @@ class TestClaudeAnalyzer:
             call_count += 1
             if call_count < 3:
                 raise Exception("Temporary error")
-            return {'steps': [{'number': 1, 'description': 'Success', 'duration_minutes': 5}]}
+            return json.dumps({'steps': [{'number': 1, 'description': 'Success', 'duration_minutes': 5}]})
         
-        with patch.object(analyzer, '_call_claude_api', side_effect=mock_api_call):
+        with patch.object(analyzer, '_run_claude_cli', side_effect=mock_api_call):
             with patch('time.sleep'):  # Don't actually sleep in tests
                 analysis = analyzer.analyze_problem(sample_problem, max_retries=3)
                 
@@ -231,15 +226,15 @@ class TestClaudeAnalyzer:
         # Low energy profile
         low_energy = ADHDProfile(energy_level='low', time_of_day='evening')
         
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [
                 {'number': 1, 'description': 'Very simple step', 'duration_minutes': 3},
                 {'number': 2, 'description': 'Another simple step', 'duration_minutes': 3},
                 {'number': 3, 'description': 'Final simple step', 'duration_minutes': 3},
             ]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem, low_energy)
             
             # Low energy should result in shorter, simpler steps
@@ -251,14 +246,14 @@ class TestClaudeAnalyzer:
         # No medication profile
         no_med = ADHDProfile(medication_taken=False, energy_level='medium')
         
-        mock_response = {
+        mock_response = json.dumps({
             'steps': [
                 {'number': 1, 'description': 'Clear, simple instruction', 'duration_minutes': 4},
                 {'number': 2, 'description': 'Another clear step', 'duration_minutes': 4},
             ]
-        }
+        })
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = analyzer.analyze_problem(sample_problem, no_med)
             
             # Without medication, steps should be clearer and shorter
@@ -287,9 +282,9 @@ class TestClaudeAnalyzer:
     
     def test_caching_mechanism(self, analyzer, sample_problem):
         """Test that responses are cached to avoid duplicate API calls"""
-        mock_response = {'steps': [{'number': 1, 'description': 'Cached', 'duration_minutes': 5}]}
+        mock_response = json.dumps({'steps': [{'number': 1, 'description': 'Cached', 'duration_minutes': 5}]})
         
-        with patch.object(analyzer, '_call_claude_api', return_value=mock_response) as mock_api:
+        with patch.object(analyzer, '_run_claude_cli', return_value=mock_response) as mock_api:
             # First call
             analysis1 = analyzer.analyze_problem(sample_problem)
             # Second call with same problem
@@ -302,9 +297,9 @@ class TestClaudeAnalyzer:
     def test_error_recovery(self, analyzer, sample_problem):
         """Test graceful error recovery"""
         # Invalid response structure
-        invalid_response = {'invalid': 'structure'}
+        invalid_response = json.dumps({'invalid': 'structure'})
         
-        with patch.object(analyzer, '_call_claude_api', return_value=invalid_response):
+        with patch.object(analyzer, '_run_claude_cli', return_value=invalid_response):
             with pytest.raises(AnalysisError) as exc_info:
                 analyzer.analyze_problem(sample_problem)
             
@@ -433,7 +428,7 @@ class TestIntegration:
     def full_analyzer(self):
         """Create fully configured analyzer"""
         return ClaudeAnalyzer(
-            api_key="test_key",
+            claude_cmd="echo",
             cache_enabled=True,
             timeout=30
         )
@@ -454,7 +449,7 @@ class TestIntegration:
             streak_days=10
         )
         
-        mock_response = {
+        mock_response = json.dumps({
             'analysis': {
                 'problem_type': 'definite_integral',
                 'difficulty_rating': 4,
@@ -508,9 +503,9 @@ class TestIntegration:
                 }
             ],
             'summary': 'Use power reduction formula to convert sin²(x), then integrate'
-        }
+        })
         
-        with patch.object(full_analyzer, '_call_claude_api', return_value=mock_response):
+        with patch.object(full_analyzer, '_run_claude_cli', return_value=mock_response):
             analysis = full_analyzer.analyze_problem(problem, profile)
             
             # Verify complete analysis

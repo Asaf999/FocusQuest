@@ -1,19 +1,19 @@
 """
-Claude AI integration for ADHD-optimized mathematical problem analysis
-Generates 3-7 step breakdowns with Socratic hints and checkpoint questions
+Claude AI integration using Claude Code CLI (FREE with Pro subscription)
+No API costs - uses local Claude Code installation for ADHD-optimized analysis
 """
+import subprocess
 import json
+import re
+import os
+import tempfile
 import time
-import asyncio
+import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, time as time_type
 from functools import lru_cache
 import hashlib
-import logging
-
-import anthropic
-from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,7 @@ class ProblemAnalysis:
     estimated_time: int
     steps: List[StepBreakdown]
     summary: str
+    adhd_tips: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         """Validate analysis"""
@@ -152,29 +153,23 @@ class ADHDProfile:
 
 
 class ClaudeAnalyzer:
-    """Analyzes mathematical problems using Claude AI"""
+    """Analyzes mathematical problems using Claude Code CLI (FREE with Pro)"""
     
-    def __init__(self, api_key: str, cache_enabled: bool = True, timeout: int = 30):
-        self.api_key = api_key
-        self.client = None  # Initialize lazily
+    def __init__(self, claude_cmd: str = "claude", cache_enabled: bool = True, timeout: int = 120):
+        self.claude_cmd = claude_cmd
         self.cache_enabled = cache_enabled
         self.timeout = timeout
         self._cache = {}
+        self.max_retries = 3
         
-    def _get_client(self):
-        """Lazy initialization of Anthropic client"""
-        if not self.client:
-            self.client = Anthropic(api_key=self.api_key)
-        return self.client
-    
     def analyze_problem(
         self, 
         problem: Dict[str, Any],
         profile: Optional[ADHDProfile] = None,
-        max_retries: int = 3,
+        max_retries: Optional[int] = None,
         timeout: Optional[float] = None
     ) -> ProblemAnalysis:
-        """Analyze a mathematical problem with ADHD optimizations"""
+        """Analyze a mathematical problem with ADHD optimizations using Claude CLI"""
         if not profile:
             profile = ADHDProfile()
             
@@ -186,8 +181,21 @@ class ClaudeAnalyzer:
         # Build prompt
         prompt = self._build_prompt(problem, profile)
         
-        # Call API with retries
-        response = self._call_with_retries(prompt, max_retries, timeout or self.timeout)
+        # Call CLI with retries
+        max_retries = max_retries or self.max_retries
+        timeout = timeout or self.timeout
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    
+                response = self._run_claude_cli(prompt, timeout)
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise AnalysisError(f"Failed after {max_retries} retries: {str(e)}")
+                logger.warning(f"CLI call attempt {attempt + 1} failed: {str(e)}")
         
         # Parse response
         try:
@@ -207,10 +215,21 @@ class ClaudeAnalyzer:
         return hashlib.md5(key_data.encode()).hexdigest()
     
     def _build_prompt(self, problem: Dict, profile: ADHDProfile) -> str:
-        """Build ADHD-optimized prompt for Claude"""
-        prompt = f"""You are an expert math tutor specializing in ADHD-friendly instruction.
+        """Build ADHD-optimized prompt for Claude CLI"""
+        prompt = f"""You are helping an ADHD student at Tel Aviv University solve a mathematical problem.
 
-Analyze this math problem and create a step-by-step solution optimized for ADHD learners.
+CRITICAL REQUIREMENTS FOR ADHD:
+1. Break solution into 3-7 steps (NEVER more than 7)
+2. Each step must take 3-10 minutes MAX (prefer {profile.preferred_step_duration} minutes)
+3. Single clear action per step - no multi-tasking
+4. Checkpoint questions for dopamine hits after each step
+5. Three-tier Socratic hints for each step
+
+USER PROFILE:
+- Energy level: {profile.energy_level}
+- Medication: {'taken' if profile.medication_taken else 'not taken' if profile.medication_taken is False else 'unknown'}
+- Time of day: {profile.time_of_day}
+- Current streak: {profile.streak_days} days
 
 PROBLEM:
 Original (Hebrew): {problem.get('raw_text', '')}
@@ -218,28 +237,10 @@ Translation: {problem.get('translated_text', '')}
 Formulas: {json.dumps(problem.get('formulas', []))}
 Difficulty: {problem.get('difficulty', 3)}/5
 
-USER PROFILE:
-- Energy level: {profile.energy_level}
-- Medication: {'taken' if profile.medication_taken else 'not taken' if profile.medication_taken is False else 'unknown'}
-- Time of day: {profile.time_of_day}
-- Preferred step duration: {profile.preferred_step_duration} minutes
-- Current streak: {profile.streak_days} days
-
-REQUIREMENTS:
-1. Break the solution into 3-7 steps
-2. Each step should take 3-10 minutes (prefer {profile.preferred_step_duration} minutes)
-3. Include a checkpoint question after each step to verify understanding
-4. Provide 3-tier Socratic hints for each step:
-   - Tier 1: Gentle conceptual nudge (short)
-   - Tier 2: More specific guidance (medium)
-   - Tier 3: Nearly complete answer but still educational (detailed)
-5. Adapt complexity based on energy level and medication status
-6. Make steps shorter and clearer if energy is low or no medication
-
-Respond with a JSON structure:
+OUTPUT FORMAT (Return ONLY valid JSON, no extra text):
 {{
     "analysis": {{
-        "problem_type": "derivative|integral|limit|etc",
+        "problem_type": "derivative|integral|limit|equation|proof|other",
         "difficulty_rating": 1-5,
         "concepts": ["concept1", "concept2"],
         "estimated_time": total_minutes
@@ -251,158 +252,146 @@ Respond with a JSON structure:
             "duration_minutes": 3-10,
             "checkpoint_question": "Question to verify understanding?",
             "hints": {{
-                "tier1": "Gentle nudge",
-                "tier2": "More specific help",
-                "tier3": "Nearly complete guidance"
+                "tier1": "Gentle nudge (short)",
+                "tier2": "More specific help (medium)",
+                "tier3": "Nearly complete guidance (detailed)"
             }}
         }}
     ],
-    "summary": "Brief summary of the solution approach"
+    "summary": "Brief summary of the solution approach",
+    "adhd_tips": [
+        "Use scratch paper for this step",
+        "Take a 2-minute break after step 3",
+        "This step is easier than it looks"
+    ]
 }}
 
-Ensure each step is self-contained and builds on previous steps.
-Make the first step especially easy to build confidence.
-The hints should progressively disclose more information."""
+Remember:
+- First step should be especially easy to build confidence
+- Hints must progressively disclose more information
+- Adapt complexity based on energy level and medication
+- Include ADHD-specific tips for challenging steps"""
 
         return prompt
     
-    def _call_with_retries(
-        self, 
-        prompt: str, 
-        max_retries: int,
-        timeout: float
-    ) -> Dict[str, Any]:
-        """Call Claude API with retry logic"""
-        last_error = None
+    def _run_claude_cli(self, prompt: str, timeout: float) -> str:
+        """Execute Claude Code CLI with proper handling"""
         
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    # Exponential backoff
-                    time.sleep(2 ** attempt)
-                    
-                response = self._call_claude_api(prompt, timeout)
-                return response
-                
-            except asyncio.TimeoutError:
-                raise AnalysisError(f"API call timeout after {timeout} seconds")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"API call attempt {attempt + 1} failed: {str(e)}")
-                
-        raise AnalysisError(f"Failed after {max_retries} retries: {str(last_error)}")
-    
-    def _call_claude_api(self, prompt: str, timeout: float) -> Dict[str, Any]:
-        """Make actual API call to Claude"""
-        # For testing, return mock response if no real client
-        if not self.api_key or self.api_key == "test_key":
-            # Return minimal valid response for testing
-            return {
-                'analysis': {
-                    'problem_type': 'test',
-                    'difficulty_rating': 3,
-                    'concepts': ['test'],
-                    'estimated_time': 15
-                },
-                'steps': [{
-                    'number': 1,
-                    'description': 'Test step',
-                    'duration_minutes': 5,
-                    'checkpoint_question': 'Test question?',
-                    'hints': {
-                        'tier1': 'Hint 1',
-                        'tier2': 'Hint 2',
-                        'tier3': 'Hint 3'
-                    }
-                }],
-                'summary': 'Test summary'
-            }
+        # Create temp file for complex prompt
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(prompt)
+            temp_path = f.name
             
-        # Real API call would go here
-        client = self._get_client()
-        
         try:
-            # Make API call with timeout
-            # This is a simplified version - real implementation would use
-            # the actual Anthropic API with proper async handling
-            message = client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=2000,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }]
+            # Prepare command
+            cmd = [self.claude_cmd]
+            
+            # Read prompt from file
+            with open(temp_path, 'r') as f:
+                prompt_content = f.read()
+            
+            # Run claude with prompt via stdin
+            result = subprocess.run(
+                cmd,
+                input=prompt_content,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env={**os.environ, 'CLAUDE_AUTO_ACCEPT': 'true'}
             )
             
-            # Parse JSON from response
-            response_text = message.content[0].text
-            return json.loads(response_text)
+            if result.returncode != 0:
+                raise RuntimeError(f"Claude CLI failed: {result.stderr}")
+                
+            return result.stdout
             
-        except Exception as e:
-            logger.error(f"Claude API error: {str(e)}")
-            raise
+        except subprocess.TimeoutExpired:
+            raise AnalysisError(f"Claude CLI timeout after {timeout} seconds")
+        except FileNotFoundError:
+            raise AnalysisError(f"Claude CLI not found. Make sure '{self.claude_cmd}' is installed and in PATH")
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
     
-    def _parse_response(self, response: Dict[str, Any]) -> ProblemAnalysis:
-        """Parse Claude's response into structured format"""
+    def _parse_response(self, output: str) -> ProblemAnalysis:
+        """Extract JSON from Claude CLI output"""
+        
+        # Remove ANSI color codes if present
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        output = ansi_escape.sub('', output)
+        
+        # Find JSON in output (Claude may add explanatory text)
+        json_match = re.search(r'\{[\s\S]*\}', output)
+        if not json_match:
+            raise ValueError("No JSON found in Claude response")
+            
         try:
-            # Check if we have the expected structure
-            if 'analysis' not in response and 'steps' not in response:
-                raise AnalysisError("Invalid response structure: missing 'analysis' and 'steps'")
-                
-            analysis_data = response.get('analysis', {})
-            steps_data = response.get('steps', [])
-            
-            if not steps_data:
-                raise AnalysisError("No steps provided in response")
-            
-            # Parse steps
-            steps = []
-            for step_data in steps_data:
-                hints_data = step_data.get('hints', {})
-                hints = HintSet(
-                    tier1=hints_data.get('tier1', 'Think about this step'),
-                    tier2=hints_data.get('tier2', 'Consider the approach'),
-                    tier3=hints_data.get('tier3', 'Here is the detailed solution')
-                )
-                
-                step = StepBreakdown(
-                    number=step_data.get('number', len(steps) + 1),
-                    description=step_data.get('description', 'Complete this step'),
-                    duration_minutes=min(10, max(3, step_data.get('duration_minutes', 5))),
-                    checkpoint_question=step_data.get('checkpoint_question', 'Do you understand?'),
-                    hints=hints
-                )
-                steps.append(step)
-            
-            # Create analysis
-            analysis = ProblemAnalysis(
-                problem_type=analysis_data.get('problem_type', 'general'),
-                difficulty_rating=analysis_data.get('difficulty_rating', 3),
-                concepts=analysis_data.get('concepts', []),
-                estimated_time=analysis_data.get('estimated_time', 15),
-                steps=steps,
-                summary=response.get('summary', 'Complete the problem step by step')
+            data = json.loads(json_match.group())
+        except json.JSONDecodeError as e:
+            # Try to fix common JSON issues
+            json_str = json_match.group()
+            # Remove trailing commas
+            json_str = re.sub(r',\s*}', '}', json_str)
+            json_str = re.sub(r',\s*]', ']', json_str)
+            data = json.loads(json_str)
+        
+        # Validate and parse response
+        analysis_data = data.get('analysis', {})
+        steps_data = data.get('steps', [])
+        
+        if not steps_data:
+            raise AnalysisError("No steps provided in response")
+        
+        # Ensure ADHD compliance - max 7 steps
+        if len(steps_data) > 7:
+            logger.warning(f"Truncating {len(steps_data)} steps to maximum 7")
+            steps_data = steps_data[:7]
+        
+        # Parse steps
+        steps = []
+        for i, step_data in enumerate(steps_data):
+            hints_data = step_data.get('hints', {})
+            hints = HintSet(
+                tier1=hints_data.get('tier1', 'Think about this step'),
+                tier2=hints_data.get('tier2', 'Consider the approach'),
+                tier3=hints_data.get('tier3', 'Here is the detailed solution')
             )
             
-            return analysis
+            # Ensure duration is ADHD-friendly
+            duration = step_data.get('duration_minutes', 5)
+            duration = min(10, max(3, duration))
             
-        except KeyError as e:
-            raise AnalysisError(f"Missing required field in response: {str(e)}")
-        except AnalysisError:
-            raise  # Re-raise our own errors
-        except Exception as e:
-            raise AnalysisError(f"Error parsing response: {str(e)}")
+            step = StepBreakdown(
+                number=step_data.get('number', i + 1),
+                description=step_data.get('description', f'Complete step {i + 1}'),
+                duration_minutes=duration,
+                checkpoint_question=step_data.get('checkpoint_question', 'Do you understand this step?'),
+                hints=hints
+            )
+            steps.append(step)
+        
+        # Create analysis
+        analysis = ProblemAnalysis(
+            problem_type=analysis_data.get('problem_type', 'general'),
+            difficulty_rating=analysis_data.get('difficulty_rating', 3),
+            concepts=analysis_data.get('concepts', []),
+            estimated_time=analysis_data.get('estimated_time', sum(s.duration_minutes for s in steps)),
+            steps=steps,
+            summary=data.get('summary', 'Complete the problem step by step'),
+            adhd_tips=data.get('adhd_tips', [])
+        )
+        
+        return analysis
 
 
 # Convenience function for quick analysis
 def analyze_math_problem(
     problem_text: str,
-    api_key: str,
     energy_level: str = 'medium',
     medication_taken: bool = True
 ) -> ProblemAnalysis:
-    """Quick function to analyze a math problem"""
-    analyzer = ClaudeAnalyzer(api_key=api_key)
+    """Quick function to analyze a math problem using Claude CLI"""
+    analyzer = ClaudeAnalyzer()
     
     problem = {
         'translated_text': problem_text,
