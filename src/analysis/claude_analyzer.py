@@ -11,8 +11,9 @@ import time
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, time as time_type
+from datetime import datetime, time as time_type, timedelta
 from functools import lru_cache
+from collections import OrderedDict
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -155,11 +156,15 @@ class ADHDProfile:
 class ClaudeAnalyzer:
     """Analyzes mathematical problems using Claude Code CLI (FREE with Pro)"""
     
-    def __init__(self, claude_cmd: str = "claude", cache_enabled: bool = True, timeout: int = 120):
+    def __init__(self, claude_cmd: str = "claude", cache_enabled: bool = True, timeout: int = 120, 
+                 max_cache_size: int = 100, cache_ttl_hours: int = 24):
         self.claude_cmd = claude_cmd
         self.cache_enabled = cache_enabled
         self.timeout = timeout
-        self._cache = {}
+        self.max_cache_size = max_cache_size
+        self.cache_ttl = timedelta(hours=cache_ttl_hours)
+        self._cache = OrderedDict()  # LRU cache using OrderedDict
+        self._cache_timestamps = {}  # Track when each entry was created
         self.max_retries = 3
         
     def analyze_problem(
@@ -173,10 +178,12 @@ class ClaudeAnalyzer:
         if not profile:
             profile = ADHDProfile()
             
-        # Check cache
+        # Check cache with TTL and LRU management
         cache_key = self._get_cache_key(problem, profile)
-        if self.cache_enabled and cache_key in self._cache:
-            return self._cache[cache_key]
+        if self.cache_enabled:
+            cached_result = self._get_from_cache(cache_key)
+            if cached_result is not None:
+                return cached_result
             
         # Build prompt
         prompt = self._build_prompt(problem, profile)
@@ -203,9 +210,9 @@ class ClaudeAnalyzer:
         except Exception as e:
             raise AnalysisError(f"Failed parsing response: {str(e)}")
             
-        # Cache result
+        # Cache result with LRU management
         if self.cache_enabled:
-            self._cache[cache_key] = analysis
+            self._put_in_cache(cache_key, analysis)
             
         return analysis
     
@@ -382,6 +389,68 @@ Remember:
         )
         
         return analysis
+    
+    def _get_from_cache(self, cache_key: str) -> Optional[ProblemAnalysis]:
+        """Get item from cache with TTL and LRU management"""
+        if cache_key not in self._cache:
+            return None
+        
+        # Check if entry has expired
+        if cache_key in self._cache_timestamps:
+            entry_time = self._cache_timestamps[cache_key]
+            if datetime.now() - entry_time > self.cache_ttl:
+                # Remove expired entry
+                del self._cache[cache_key]
+                del self._cache_timestamps[cache_key]
+                return None
+        
+        # Move to end (most recently accessed) for LRU
+        self._cache.move_to_end(cache_key)
+        return self._cache[cache_key]
+    
+    def _put_in_cache(self, cache_key: str, analysis: ProblemAnalysis):
+        """Put item in cache with size and TTL management"""
+        # Remove if already exists
+        if cache_key in self._cache:
+            del self._cache[cache_key]
+            del self._cache_timestamps[cache_key]
+        
+        # Check if cache is full
+        if len(self._cache) >= self.max_cache_size:
+            # Remove oldest (LRU) entry
+            oldest_key = next(iter(self._cache))
+            del self._cache[oldest_key]
+            del self._cache_timestamps[oldest_key]
+        
+        # Add new entry
+        self._cache[cache_key] = analysis
+        self._cache_timestamps[cache_key] = datetime.now()
+    
+    def _cleanup_expired_cache(self):
+        """Clean up expired cache entries (can be called periodically)"""
+        current_time = datetime.now()
+        expired_keys = []
+        
+        for cache_key, timestamp in self._cache_timestamps.items():
+            if current_time - timestamp > self.cache_ttl:
+                expired_keys.append(cache_key)
+        
+        for key in expired_keys:
+            del self._cache[key]
+            del self._cache_timestamps[key]
+    
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """Check if cache entry is valid (not expired)"""
+        if cache_key not in self._cache_timestamps:
+            return False
+        
+        entry_time = self._cache_timestamps[cache_key]
+        return datetime.now() - entry_time <= self.cache_ttl
+    
+    def clear_cache(self):
+        """Clear all cache entries"""
+        self._cache.clear()
+        self._cache_timestamps.clear()
 
 
 # Convenience function for quick analysis

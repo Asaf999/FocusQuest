@@ -391,7 +391,8 @@ class PDFProcessor:
             raise PDFProcessingError(f"Error processing PDF: {str(e)}")
     
     def _extract_with_ocr(self, page) -> str:
-        """Extract text using OCR for scanned pages"""
+        """Extract text using OCR for scanned pages with proper image cleanup"""
+        image = None
         try:
             # Convert page to image
             image = page.to_image(resolution=300).original
@@ -403,6 +404,13 @@ class PDFProcessor:
         except Exception as e:
             print(f"OCR extraction failed: {e}")
             return ""
+        finally:
+            # Critical: Close PIL image to prevent memory leak
+            if image is not None:
+                try:
+                    image.close()
+                except:
+                    pass  # Ignore errors during cleanup
     
     def is_rtl_text(self, text: str) -> bool:
         """Check if text is primarily right-to-left (Hebrew)"""

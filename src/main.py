@@ -3,6 +3,7 @@ FocusQuest - ADHD-optimized mathematics learning RPG
 Main application entry point
 """
 import sys
+import gc
 import logging
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -102,6 +103,11 @@ class FocusQuestApp:
         self.autosave_timer = QTimer()
         self.autosave_timer.timeout.connect(self._save_state)
         self.autosave_timer.start(30000)  # Save every 30 seconds
+        
+        # Setup memory cleanup timer
+        self.memory_cleanup_timer = QTimer()
+        self.memory_cleanup_timer.timeout.connect(self._periodic_memory_cleanup)
+        self.memory_cleanup_timer.start(300000)  # Clean up every 5 minutes
         
         # Check for crash recovery
         self._check_crash_recovery()
@@ -341,14 +347,36 @@ class FocusQuestApp:
         except Exception as e:
             logger.error(f"Error restoring state: {e}")
     
+    def _periodic_memory_cleanup(self):
+        """Periodic memory cleanup to prevent leaks"""
+        try:
+            # Force garbage collection
+            collected = gc.collect()
+            
+            # Clean up caches in analyzers if they exist
+            if hasattr(self, 'problem_loader') and hasattr(self.problem_loader, 'analyzer'):
+                analyzer = self.problem_loader.analyzer
+                if hasattr(analyzer, '_cleanup_expired_cache'):
+                    analyzer._cleanup_expired_cache()
+            
+            logger.debug(f"Memory cleanup: collected {collected} objects")
+            
+        except Exception as e:
+            logger.error(f"Error during memory cleanup: {e}")
+    
     def _cleanup(self):
         """Cleanup resources on exit"""
         logger.info("Performing cleanup...")
         self.running = False
         
-        # Stop autosave timer
+        # Stop timers
         if hasattr(self, 'autosave_timer'):
             self.autosave_timer.stop()
+        if hasattr(self, 'memory_cleanup_timer'):
+            self.memory_cleanup_timer.stop()
+        
+        # Final memory cleanup
+        self._periodic_memory_cleanup()
         
         # Save final state
         self._save_state()
