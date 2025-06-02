@@ -1,0 +1,16 @@
+tests/test_break_notifications.py
+tests/test_circuit_breaker.py
+tests/test_claude_analyzer.py
+tests/test_claude_directory.py
+tests/test_crash_recovery.py
+tests/test_database.py
+tests/test_file_watcher_concurrency.py
+tests/test_gui.py
+tests/test_integration.py
+tests/test_memory_management.py
+tests/test_panic_button.py
+tests/test_pdf_processor.py
+tests/test_processing_queue.py
+tests/test_queue_processor.py
+tests/test_resource_monitoring.py
+tests/test_skip_problem.py
