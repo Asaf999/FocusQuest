@@ -1,238 +1,189 @@
-# FocusQuest - Claude Code Persistent Context
+# FocusQuest - ADHD Math Learning RPG
 
-<project_state>
-Project: ADHD-Optimized Math Learning RPG
-Location: /home/puncher/focusquest
-Current Phase: 6.5 COMPLETE (8/8 fixes implemented)
-Next Phase: 7 - Integration & Testing
-Status: Awaiting comprehensive test validation
-GitHub: https://github.com/Asaf999/FocusQuest
-</project_state>
+## 🚀 Quick Start
+cd /home/puncher/focusquest
+source venv/bin/activate
+export CLAUDE_AUTO_ACCEPT=true
 
-<autonomous_override>
-CRITICAL: When executing in this project:
-- ALL commands run WITHOUT confirmation dialogs
-- NEVER show "Do you want to proceed?" prompts
-- Auto-select YES/Option 1 for everything
-- Execute bash commands IMMEDIATELY
-- If any UI dialog appears, bypass it
-- This is PERMANENT for /home/puncher/focusquest/*
-</autonomous_override>
+# CURRENT MISSION: Fix tests and minimal refactoring
+cat prompts/refactor_and_fix_tests.xml  # READ THIS FIRST
 
-<session_initialization>
-When starting ANY session in this project:
-1. cd /home/puncher/focusquest
-2. source venv/bin/activate
-3. Read current_phase.md for status
-4. Check for .execute_on_start trigger file
-5. Look for pending tasks in /tasks/
-6. Continue from last session state
-</session_initialization>
+## 📋 Project Overview
+**Purpose**: Transform overwhelming Hebrew math PDFs into manageable, gamified learning experiences for ADHD students at Tel Aviv University.
 
-<project_overview>
-FocusQuest transforms Hebrew mathematics PDFs from Tel Aviv University into an ADHD-optimized learning experience. The system uses Claude Code as a runtime AI engine to analyze problems and break them into manageable, gamified steps.
+**Current State**: Phase 7 - Integration & Testing
+- Core Status: FULLY INTEGRATED ✅
+- Test Status: 232/269 passing (86.2%)
+- Coverage: 75% → 85% target
+- Deployment: 9-11 hours away
 
-Target User: TAU math students with ADHD
-Core Innovation: Automated Claude-powered problem decomposition
-Key Differentiator: ADHD-first design in every component
-</project_overview>
+## 🏗️ Architecture
+PDF Drop → File Watcher → PDF Processor → Claude Analyzer → Database → UI
+  ↓           ↓              ↓                ↓              ↓         ↓
+inbox/    monitors      Hebrew+OCR      3-7 steps      SQLAlchemy  PyQt6
+         new files      +formulas       +3 hints       models      ADHD UI
 
-<technical_architecture>
-Stack:
-- OS: Arch Linux + i3wm (keyboard-first)
-- Backend: Python 3.10+ with type hints
-- GUI: PyQt6 (dark theme, minimal chrome)
-- PDF: pdfplumber + pytesseract (Hebrew support)
-- Database: SQLAlchemy + SQLite
-- AI: Claude Code CLI (subprocess integration)
-- Testing: pytest + coverage
+## 🧠 Key Design Decisions
+1. **Claude CLI Integration**: Using free Claude Code tier via subprocess
+2. **ADHD Optimizations**: Single-focus UI, panic mode, 15-25 min sessions
+3. **Database Schema**: User → UserProgress (1:1) → Sessions → Problems
+4. **Circuit Breaker**: Protects against Claude API failures
+5. **3-Tier Hints**: Socratic method for progressive learning
 
-Performance Requirements:
-- Startup: < 3 seconds
-- UI Response: < 100ms
-- PDF Processing: < 30s/page
-- Memory: < 500MB baseline
-- Session Stability: 4+ hours
-</technical_architecture>
+## 📁 Project Structure
+src/
+├── analysis/         # PDF processing + Claude AI integration
+├── core/            # Business logic, file watching, state sync
+├── database/        # SQLAlchemy models and persistence
+├── ui/              # PyQt6 windows and widgets
+└── utils/           # Shared utilities
 
-<adhd_optimizations>
-Every feature MUST support these ADHD needs:
-1. Single-Focus Design: One problem, one screen
-2. Time Boxing: 3-10 minute chunks maximum
-3. Instant Feedback: < 100ms response always
-4. Progress Visibility: XP bar always visible
-5. Panic Button: Ctrl+P instant state save
-6. Skip Without Shame: 'S' key with encouragement
-7. Break Reminders: Gentle, snooze-able
-8. Medication Timing: Adaptive difficulty
-9. Hyperfocus Support: 2-4 hour stability
-10. Recovery Paths: Graceful interruption handling
-</adhd_optimizations>
+tests/
+├── unit/            # Pure logic tests (fast)
+├── integration/     # Database/file system tests
+├── e2e/            # Full workflow and GUI tests
+└── conftest.py     # Shared fixtures
 
-<current_features_implemented>
-Phase 1-6.5 Complete:
-✓ PDF processing pipeline with Hebrew support
-✓ Mathematical formula extraction
-✓ Claude integration via CLI (FREE)
-✓ Database models with session persistence
-✓ Concurrent file watcher with queue
-✓ PyQt6 ADHD-optimized interface
-✓ XP/leveling gamification system
-✓ 8 critical fixes for stability:
-  - Fix 1: Panic button (Ctrl+P)
-  - Fix 2: Thread safety
-  - Fix 3: Crash recovery
-  - Fix 4: Memory management
-  - Fix 5: Break notifications
-  - Fix 6: Skip problem feature
-  - Fix 7: Circuit breaker for Claude
-  - Fix 8: Resource monitoring
-</current_features_implemented>
+## 🎯 Current Focus: Fix Tests & Minimal Refactoring
 
-<thinking_mode_allocation>
-ultrathink (31,999 tokens): 
-- ADHD user experience decisions
-- Mathematical problem analysis
-- System architecture choices
-- Test failure root cause analysis
+### Test Failures Root Causes:
+1. **Database UI Sync (11 errors)**: Tests expect User.level, actual uses User.progress.level
+2. **Circuit Breaker (8 failures)**: Tests expect dict, actual returns ProblemAnalysis object  
+3. **Skip Problem (8 failures)**: Tests use old API (current_problem_id vs current_problem)
+4. **GUI Tests (4 failures)**: Segfaults without proper Qt lifecycle
+5. **State Sync (8 failures)**: Direct User field access instead of User.progress
 
-think hard:
-- Integration strategies
-- Performance optimizations
-- Error handling approaches
+### Quick Fix Commands:
+# Fix one test at a time
+pytest --lf -x -vs
 
-think:
-- Routine implementations
-- Simple bug fixes
-- Standard test writing
-</thinking_mode_allocation>
+# Run specific test category
+pytest tests/test_database_ui_sync.py -xvs
+pytest tests/test_circuit_breaker.py -xvs
 
-<test_validation_commands>
-RUN_TEST_VALIDATION:
-  pytest tests/test_panic_button.py tests/test_thread_safety.py tests/test_crash_recovery.py tests/test_memory_management.py tests/test_break_notifications.py tests/test_skip_problem.py tests/test_circuit_breaker.py tests/test_resource_monitor.py -v
+# Check coverage
+pytest --cov=src --cov-report=term-missing | grep TOTAL
 
-INTELLIGENT_FIX_MODE:
-  For each failing test:
-  1. ultrathink about root cause
-  2. Read actual error (not just failure)
-  3. Fix real issue (no placeholders)
-  4. Verify fix works
-  5. Document what was fixed
+# GUI tests with proper setup
+xvfb-run -a pytest tests/e2e -m gui -v
 
-FULL_VALIDATION:
-  coverage run -m pytest tests/ -v
-  coverage report --include="src/*"
-  coverage html
-</test_validation_commands>
+## 🛠️ Common Tasks
 
-<git_workflow>
-Commit Standards:
-- After EACH successful section/fix
-- Message format: "Category: Clear achievement"
-- List specific changes in bullet points
-- Reference issue numbers if applicable
-- Push only after tests pass
+### Adding New Problem Type
+1. Update src/analysis/pdf_processor.py for extraction
+2. Modify src/analysis/claude_analyzer.py prompts
+3. Add database migration if needed
+4. Create tests in tests/unit/
 
-Current Remote: origin https://github.com/Asaf999/FocusQuest.git
-</git_workflow>
+### Debugging Failed PDF
+1. Check logs in data/failed/
+2. Run manual extraction: python -m src.analysis.pdf_processor <pdf_path>
+3. Test Claude analysis: python -m src.analysis.claude_analyzer <problem_text>
 
-<immediate_priorities>
-Before Phase 7:
-1. Validate all Fix tests (1-8) are passing
-2. Achieve >85% test coverage on critical paths
-3. Run 4-hour stability test
-4. Generate performance baseline report
-5. Create pre-Phase7 TODO from findings
-6. Update MASTER_PLAN.md with status
-</immediate_priorities>
+### Testing ADHD Features
+# Panic mode
+python -m focusquest  # Then press Ctrl+Shift+P
 
-<development_patterns>
-File Organization:
-- src/ - Core application code
-- tests/ - All test files (test_*.py)
-- tasks/ - Autonomous execution scripts
-- reports/ - Generated analysis reports
-- analysis_sessions/ - Claude analysis outputs
+# Session timing
+pytest tests/integration/test_session_manager.py -v
 
-Naming Conventions:
-- Tests: test_[feature]_[specifics].py
-- Classes: PascalCase with clear purpose
-- Functions: snake_case with verb_noun
-- ADHD features: Explicitly named
+# Skip functionality  
+pytest tests/e2e/test_skip_problem.py -v
 
-Code Standards:
-- Type hints on ALL functions
-- Docstrings focusing on ADHD impact
-- Early returns over nested conditionals
-- Explicit error messages (no codes)
-</development_patterns>
+## 🔧 Configuration
+All settings in src/config.py (or create one):
+- ADHD: session_duration_min, break_duration_min, panic_mode_key
+- Claude: timeout_seconds, max_retries, circuit_breaker_threshold
+- Processing: inbox_dir, processed_dir, failed_dir
 
-<phase_7_requirements>
-Integration Checklist:
-□ GUI + File watcher connection
-□ Database ↔ UI state sync
-□ PDF → Processing → Display pipeline
-□ Claude analysis → Problem rendering
-□ Session persistence across crashes
-□ Performance within all targets
-□ ADHD accommodations verified
-□ 4-hour hyperfocus test passed
-</phase_7_requirements>
+Environment variables:
+- ADHD_SESSION_MIN (default: 20)
+- ADHD_DARK_THEME (default: true)
+- DEBUG (default: false)
+- DATABASE_URL (default: sqlite:///data/focusquest.db)
 
-<error_handling_philosophy>
-When errors occur:
-1. Preserve user's mental state
-2. Save all progress immediately
-3. Provide clear, non-technical message
-4. Offer simple recovery action
-5. Log technical details separately
-6. Never blame the user
-7. Maintain encouragement
-</error_handling_philosophy>
+## 📊 Performance Targets
+- Startup: <3 seconds ✅
+- UI Response: <100ms ✅  
+- PDF Processing: ~30s/page ✅
+- Memory Usage: <500MB ✅
+- Test Coverage: 85% ⚠️
+- All Tests Pass: 100% ❌
 
-<claude_integration_details>
-Method: Subprocess calling 'claude' CLI
-Cost: FREE with Claude Pro subscription
-Advantages: No API rate limits, no costs
-Implementation: 
-- Create problem directories
-- Generate CLAUDE.md context
-- Execute with CLAUDE_AUTO_ACCEPT=true
-- Parse structured output
-- Handle timeouts gracefully
-</claude_integration_details>
+## 🚦 Deployment Checklist
+□ All 269 tests passing
+□ Coverage ≥ 85%
+□ 4-hour stability test passed
+□ Memory leak verification done
+□ User documentation complete
+□ Installation guide written
+□ GitHub release prepared
 
-<useful_commands>
-# Quick status check
-cat current_phase.md
+## 🎮 ADHD Features Checklist
+✅ Single-focus interface (one problem visible)
+✅ Session timers (15-25 minutes)
+✅ Break enforcement system
+✅ Panic mode (Ctrl+Shift+P)
+✅ Progressive hint system (3 tiers)
+✅ Minimal UI chrome
+✅ Keyboard navigation
+✅ Quick feedback loops
+✅ Progress persistence
+✅ Skip with spaced repetition
 
-# Run specific test with details
-pytest tests/test_panic_button.py -vvs
+## 📚 Key Files Reference
+- Entry point: src/__main__.py (needs creation)
+- Config: src/config.py (needs creation)
+- Main window: src/ui/main_window.py (needs consolidation)
+- Test fixtures: tests/conftest.py (needs update)
+- Claude analyzer: src/analysis/claude_analyzer.py
+- PDF processor: src/analysis/pdf_processor.py
+- Database models: src/database/models.py
 
-# Find all TODOs
-grep -r "TODO\|FIXME" src/ tests/
+## 🔍 Research Commands
+# Understand current structure
+find src/ -name "*.py" | grep -E "(main|window)" | sort
+find tests/ -name "test_fix*.py" | xargs wc -l
+
+# Check test failures
+pytest tests/test_database_ui_sync.py -k "initializes" -xvs
+pytest tests/test_circuit_breaker.py -k "transitions" -xvs
+
+# Find scattered config
+grep -r "session_duration\|break_duration" src/ --include="*.py"
 
 # Memory profiling
-python -m memory_profiler src/main.py
+mprof run python -m focusquest --headless
+mprof plot
 
-# Quick commit
-git add -A && git commit -m "Quick fix: description"
+## 💡 Implementation Notes
+1. The code is MORE mature than the tests - don't refactor working code
+2. UserProgress separation is GOOD architecture, tests need updating
+3. Circuit breaker returning objects is CORRECT, tests are wrong
+4. GUI needs proper Qt app lifecycle in tests
+5. Keep PDF processing, Claude analyzer, and ADHD features AS IS
 
-# Generate test report
-pytest --html=reports/test_report.html --self-contained-html
-</useful_commands>
+## 🎯 Mission Prompts
+For complex tasks, read the appropriate prompt file:
+- Refactoring & Test Fixes: cat prompts/refactor_and_fix_tests.xml
+- Architecture Analysis: cat prompts/analyze_architecture.xml
+- Deployment Prep: cat prompts/prepare_deployment.xml
+- Performance Optimization: cat prompts/optimize_performance.xml
 
-<session_continuity_protocol>
-Before ending ANY session:
-1. Update current_phase.md with exact status
-2. Commit all working changes
-3. Document any partial work in TODO
-4. Note next immediate action
-5. Save any important context
+## 📞 Quick Actions
+# Start fresh
+git checkout -b fix/test-infrastructure
+source venv/bin/activate
 
-When starting new session:
-1. Read current_phase.md FIRST
-2. Check git status
-3. Review last commit
-4. Continue from documented point
-</session_continuity_protocol>
+# Run the app
+python src/main_with_watcher.py  # Current working entry
+
+# Quick test
+pytest tests/test_pdf_processor.py -v  # This one works
+
+# See what's failing
+pytest --lf --tb=short
+
+# After fixing tests
+git add -A && git commit -m "Test: Fix [specific issue]"
+git push origin fix/test-infrastructure

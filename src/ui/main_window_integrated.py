@@ -86,12 +86,13 @@ class FocusQuestIntegratedWindow(FocusQuestWindow):
         if not self.current_problem:
             self._load_next_from_queue()
         else:
-            # Show notification
-            self.show_notification(
-                "New Problem Ready! 📚",
-                "A new problem has been analyzed and added to your queue.",
-                duration=3000
-            )
+            # Show notification if method exists
+            if hasattr(self, 'show_notification'):
+                self.show_notification(
+                    "New Problem Ready! 📚",
+                    "A new problem has been analyzed and added to your queue.",
+                    duration=3000
+                )
             
     def _load_next_from_queue(self, *args):
         """Load next problem from queue."""
@@ -183,11 +184,16 @@ class FocusQuestIntegratedWindow(FocusQuestWindow):
     def _on_watcher_error(self, error_msg: str):
         """Handle file watcher errors."""
         logger.error(f"File watcher error: {error_msg}")
-        self.show_notification(
-            "File Watcher Issue",
-            f"There was an issue with file monitoring: {error_msg}",
-            duration=5000
-        )
+        if hasattr(self, 'show_notification'):
+            self.show_notification(
+                "File Watcher Issue",
+                f"There was an issue with file monitoring: {error_msg}",
+                duration=5000
+            )
+        else:
+            # Fallback to message box
+            QMessageBox.warning(self, "File Watcher Issue", 
+                              f"There was an issue with file monitoring: {error_msg}")
         
     def _check_queue_status(self):
         """Periodic check of queue status."""
@@ -200,20 +206,30 @@ class FocusQuestIntegratedWindow(FocusQuestWindow):
                 self.file_watcher.pause_processing()
                 
     def enter_panic_mode(self):
-        """Override to pause file processing during panic."""
-        super().enter_panic_mode()
+        """Pause file processing during panic mode."""
+        # Set panic mode flag
+        self.panic_mode_active = True
         
         # Pause file processing
         if hasattr(self, 'file_watcher'):
             self.file_watcher.pause_processing()
             
+        # Call parent method if it exists
+        if hasattr(super(), 'enter_panic_mode'):
+            super().enter_panic_mode()
+            
     def exit_panic_mode(self):
-        """Override to resume file processing after panic."""
-        super().exit_panic_mode()
+        """Resume file processing after panic mode."""
+        # Clear panic mode flag
+        self.panic_mode_active = False
         
         # Resume file processing
         if hasattr(self, 'file_watcher'):
             self.file_watcher.resume_processing()
+            
+        # Call parent method if it exists
+        if hasattr(super(), 'exit_panic_mode'):
+            super().exit_panic_mode()
             
     def closeEvent(self, event):
         """Clean shutdown of file watcher."""

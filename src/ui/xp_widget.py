@@ -112,11 +112,15 @@ class XPWidget(QWidget):
         increment = (end - start) / steps
         
         def update_step(step):
-            if step <= steps:
-                value = int(start + increment * step)
-                self.xp_bar.setValue(value)
-                self.xp_label.setText(f"XP: {value} / {self.xp_bar.maximum()}")
-                QTimer.singleShot(50, lambda: update_step(step + 1))
+            if step <= steps and hasattr(self, 'xp_bar'):
+                try:
+                    value = int(start + increment * step)
+                    self.xp_bar.setValue(value)
+                    self.xp_label.setText(f"XP: {value} / {self.xp_bar.maximum()}")
+                    QTimer.singleShot(50, lambda: update_step(step + 1))
+                except RuntimeError:
+                    # Widget was deleted during animation
+                    pass
                 
         update_step(1)
         

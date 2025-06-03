@@ -5,7 +5,7 @@ from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from src.database.db_manager import DatabaseManager
-from src.database.models import User, Session, Problem, ProblemAttempt
+from src.database.models import User, UserProgress, Session, Problem, ProblemAttempt
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +51,22 @@ class StateSynchronizer(QObject):
                 if not user:
                     user = User(
                         username=username,
-                        created_at=datetime.now(),
+                        created_at=datetime.now()
+                    )
+                    session.add(user)
+                    session.flush()  # Get user ID
+                    
+                    # Create user progress
+                    progress = UserProgress(
+                        user_id=user.id,
                         total_xp=0,
                         level=1,
                         current_streak=0,
                         longest_streak=0,
-                        problems_completed=0,
-                        problems_attempted=0,
+                        problems_solved=0,
                         total_time_minutes=0
                     )
-                    session.add(user)
+                    session.add(progress)
                     session.commit()
                     logger.info(f"Created new user: {username}")
                 else:
@@ -72,10 +78,10 @@ class StateSynchronizer(QObject):
                 return {
                     'user_id': user.id,
                     'username': user.username,
-                    'level': user.level,
-                    'total_xp': user.total_xp,
-                    'current_streak': user.current_streak,
-                    'problems_completed': user.problems_completed
+                    'level': user.progress.level if user.progress else 1,
+                    'total_xp': user.progress.total_xp if user.progress else 0,
+                    'current_streak': user.progress.current_streak if user.progress else 0,
+                    'problems_completed': user.progress.problems_solved if user.progress else 0
                 }
                 
         except Exception as e:
@@ -99,12 +105,9 @@ class StateSynchronizer(QObject):
                     user_id=user.id,
                     start_time=datetime.now(),
                     problems_attempted=0,
-                    problems_completed=0,
-                    problems_skipped=0,
+                    problems_solved=0,
                     xp_earned=0,
-                    hints_used=0,
-                    total_time_seconds=0,
-                    energy_level='normal'
+                    medication_taken=False
                 )
                 session.add(new_session)
                 session.commit()
@@ -154,10 +157,9 @@ class StateSynchronizer(QObject):
                     user_id=self._current_user.id,
                     session_id=self._current_session.id,
                     started_at=datetime.now(),
-                    current_step=0,
                     hints_used=0,
-                    is_completed=False,
-                    is_skipped=False
+                    completed=False,
+                    skipped=False
                 )
                 session.add(attempt)
                 session.commit()
@@ -181,7 +183,8 @@ class StateSynchronizer(QObject):
                     self._current_problem_attempt.id
                 )
                 if attempt:
-                    attempt.current_step = step
+                    # Note: ProblemAttempt doesn't have current_step field
+                    # Only update hints_used
                     attempt.hints_used = hints_used
                     session.commit()
                     
@@ -200,7 +203,7 @@ class StateSynchronizer(QObject):
                     self._current_problem_attempt.id
                 )
                 if attempt:
-                    attempt.is_completed = True
+                    attempt.completed = True
                     attempt.completed_at = datetime.now()
                     attempt.time_spent_seconds = int(
                         (attempt.completed_at - attempt.started_at).total_seconds()
@@ -210,15 +213,15 @@ class StateSynchronizer(QObject):
                 # Update session stats
                 db_session = session.query(Session).get(self._current_session.id)
                 if db_session:
-                    db_session.problems_completed += 1
+                    db_session.problems_solved += 1
                     db_session.xp_earned += xp_earned
                     
                 # Update user stats
                 user = session.query(User).get(self._current_user.id)
-                if user:
-                    user.problems_completed += 1
-                    user.total_xp += xp_earned
-                    user.level = self._calculate_level(user.total_xp)
+                if user and user.progress:
+                    user.progress.problems_solved += 1
+                    user.progress.total_xp += xp_earned
+                    user.progress.level = self._calculate_level(user.progress.total_xp)
                     
                 session.commit()
                 logger.info(f"Completed problem attempt {attempt.id}")
@@ -242,13 +245,11 @@ class StateSynchronizer(QObject):
                     self._current_problem_attempt.id
                 )
                 if attempt:
-                    attempt.is_skipped = True
+                    attempt.skipped = True
                     attempt.skipped_at = datetime.now()
                     
-                # Update session stats
-                db_session = session.query(Session).get(self._current_session.id)
-                if db_session:
-                    db_session.problems_skipped += 1
+                # Update session stats (if session tracking is needed for skips)
+                # Note: Session model doesn't have problems_skipped field
                     
                 session.commit()
                 logger.info(f"Skipped problem attempt {attempt.id}")
@@ -269,7 +270,7 @@ class StateSynchronizer(QObject):
         try:
             with self.db_manager.session_scope() as session:
                 # Get last user
-                user = session.query(User).order_by(User.last_seen.desc()).first()
+                user = session.query(User).order_by(User.created_at.desc()).first()
                 if not user:
                     return {}
                     
@@ -287,16 +288,16 @@ class StateSynchronizer(QObject):
                 # Get last incomplete problem
                 last_attempt = session.query(ProblemAttempt).filter_by(
                     user_id=user.id,
-                    is_completed=False,
-                    is_skipped=False
+                    completed=False,
+                    skipped=False
                 ).order_by(ProblemAttempt.started_at.desc()).first()
                 
                 state = {
                     'user': {
                         'id': user.id,
                         'username': user.username,
-                        'level': user.level,
-                        'total_xp': user.total_xp
+                        'level': user.progress.level if user.progress else 1,
+                        'total_xp': user.progress.total_xp if user.progress else 0
                     },
                     'session': {
                         'id': last_session.id if last_session else None,
@@ -304,7 +305,7 @@ class StateSynchronizer(QObject):
                     },
                     'problem': {
                         'id': last_attempt.problem_id if last_attempt else None,
-                        'step': last_attempt.current_step if last_attempt else 0
+                        'step': 0  # current_step doesn't exist in model
                     }
                 }
                 
@@ -333,14 +334,14 @@ class StateSynchronizer(QObject):
         try:
             with self.db_manager.session_scope() as session:
                 user = session.query(User).get(self._current_user.id)
-                if user:
+                if user and user.progress:
                     return {
-                        'level': user.level,
-                        'total_xp': user.total_xp,
-                        'problems_completed': user.problems_completed,
-                        'current_streak': user.current_streak,
-                        'longest_streak': user.longest_streak,
-                        'total_time_hours': user.total_time_minutes / 60.0
+                        'level': user.progress.level,
+                        'total_xp': user.progress.total_xp,
+                        'problems_completed': user.progress.problems_solved,
+                        'current_streak': user.progress.current_streak,
+                        'longest_streak': user.progress.longest_streak,
+                        'total_time_hours': user.progress.total_time_minutes / 60.0
                     }
         except Exception as e:
             logger.error(f"Error getting user stats: {e}")

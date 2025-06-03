@@ -36,6 +36,7 @@ class Problem(Base):
     category = Column(String(50), nullable=False)  # calculus, algebra, etc.
     pdf_source = Column(String(255))
     page_number = Column(Integer)
+    processed_file_id = Column(Integer, ForeignKey('processed_files.id'))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
@@ -258,6 +259,25 @@ class ProblemAttempt(Base):
         self.time_spent_seconds = int(time_spent.total_seconds())
         self.hints_used = hints_used
         self.xp_earned = xp_earned
+
+
+class ProcessedFile(Base):
+    """Track PDF files that have been processed"""
+    __tablename__ = 'processed_files'
+    
+    id = Column(Integer, primary_key=True)
+    filename = Column(String(255), unique=True, nullable=False)
+    file_path = Column(String(500))
+    file_hash = Column(String(64))  # SHA256 hash to detect duplicates
+    total_pages = Column(Integer)
+    processed_pages = Column(Integer, default=0)
+    problems_extracted = Column(Integer, default=0)
+    processed_at = Column(DateTime, default=func.now())
+    status = Column(String(50), default='pending')  # pending, processing, completed, failed
+    error_message = Column(Text)
+    
+    # Relationships
+    problems = relationship("Problem", backref="processed_file")
 
 
 class SkippedProblem(Base):

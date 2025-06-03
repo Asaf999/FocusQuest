@@ -1,140 +1,106 @@
 #!/bin/bash
-# FocusQuest Autonomous Gold Miner
-# Run overnight for automatic improvements
+# FocusQuest Phase 7 - Test Fixing & Stability Gold Miner
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${GREEN}💰 FocusQuest Gold Miner v1.0 💰${NC}"
-echo "Starting autonomous improvement system..."
+echo "💰 FocusQuest Phase 7 Gold Miner - Testing Focus 💰"
+echo "Mission: Fix tests, improve coverage, ensure stability"
 
 # Check if already running
 if tmux has-session -t gold-miner 2>/dev/null; then
-    echo -e "${RED}Gold miner already running!${NC}"
-    echo "Attach with: tmux attach -t gold-miner"
-    echo "Kill with: tmux kill-session -t gold-miner"
+    echo "Gold miner already running!"
     exit 1
 fi
 
-# Create improvement script
-cat > /tmp/gold_mine_cycle.sh << 'SCRIPT'
+# Create Phase 7 specific improvement script
+cat > /tmp/phase7_gold_mine.sh << 'SCRIPT'
 #!/bin/bash
 cd /home/puncher/focusquest
 source venv/bin/activate
 
-# Initialize
-echo "=== GOLD MINING STARTED $(date) ===" > golden_nuggets.log
-echo "Initial Metrics:" >> golden_nuggets.log
-coverage report 2>/dev/null | grep TOTAL >> golden_nuggets.log || echo "Coverage: Unknown" >> golden_nuggets.log
-pytest tests/ --tb=no 2>/dev/null | grep passed >> golden_nuggets.log || echo "Tests: Unknown" >> golden_nuggets.log
+echo "=== PHASE 7 GOLD MINING STARTED $(date) ===" > phase7_gold.log
+echo "Initial Status:" >> phase7_gold.log
+pytest tests/ --tb=no | grep -E "passed|failed" >> phase7_gold.log
+coverage report | grep TOTAL >> phase7_gold.log
 
-# Define improvement targets
+# Phase 7 specific targets
 declare -a TARGETS=(
-    "TEST_COVERAGE_MINING:Find untested functions and add comprehensive tests"
-    "PERFORMANCE_MINING:Profile and optimize slowest operations"
-    "ERROR_HANDLING_MINING:Add ADHD-friendly error messages"
-    "MEMORY_LEAK_MINING:Find and fix memory leaks"
-    "USER_EXPERIENCE_MINING:Optimize UI responsiveness"
-    "INTEGRATION_MINING:Add missing integration tests"
-    "ADHD_FEATURE_MINING:Implement new ADHD accommodations"
-    "DOCUMENTATION_MINING:Document undocumented functions"
+    "TEST_FIXING:Fix failing tests one by one"
+    "COVERAGE_IMPROVEMENT:Increase coverage to 85%"
+    "STABILITY_VALIDATION:Run extended stability tests"
+    "PERFORMANCE_VERIFICATION:Confirm all metrics green"
+    "INTEGRATION_TESTING:Test complete workflows"
+    "ERROR_RECOVERY:Test crash scenarios"
+    "MEMORY_PROFILING:Check for memory leaks"
+    "DOCUMENTATION:Complete user guides"
 )
 
-# Run 10 cycles (7.5 hours of work + breaks)
+# Run 10 cycles focused on testing
 for i in {1..10}; do
-    echo ""
-    echo "=== CYCLE $i/10 STARTING $(date) ===" | tee -a golden_nuggets.log
+    echo "=== CYCLE $i/10 - PHASE 7 TESTING ===" | tee -a phase7_gold.log
     
-    # Select target for this cycle
     TARGET_INDEX=$((($i - 1) % ${#TARGETS[@]}))
     IFS=':' read -r TARGET_NAME TARGET_DESC <<< "${TARGETS[$TARGET_INDEX]}"
     
-    echo "Target: $TARGET_NAME" | tee -a golden_nuggets.log
-    echo "Goal: $TARGET_DESC" | tee -a golden_nuggets.log
-    
-    # Create cycle instruction
     cat > cycle_instruction.md << INSTRUCTION
-AUTONOMOUS IMPROVEMENT CYCLE $i
+PHASE 7 TESTING CYCLE $i
 
 Target: $TARGET_NAME
 Description: $TARGET_DESC
-Time Budget: 45 minutes
-Decision Policy: ALL prompts → automatic YES
+Time: 45 minutes
+Focus: Testing and Stabilization (NO NEW FEATURES)
 
-PHASE 1 (5 min): Research with ultrathink
-- Analyze current state
-- Find highest impact improvement
-- Must be completable in 35 minutes
+PRIORITY ORDER:
+1. Fix failing tests (17 remaining)
+2. Increase coverage (75% → 85%)
+3. Validate stability
+4. Document results
 
-PHASE 2 (5 min): Plan
-- Write 3 test cases first
-- Define measurable success metric
-- List max 3 files to modify
+For TEST_FIXING:
+- Run: pytest tests/ --lf -x -v
+- ultrathink about the failure
+- Fix mock configuration issues
+- Verify fix doesn't break others
 
-PHASE 3 (25 min): Implement
-- TDD: Write failing tests
-- Implement until tests pass
-- Run pytest every 5 minutes
+For COVERAGE_IMPROVEMENT:
+- Run: coverage report --show-missing
+- Find uncovered code paths
+- Write tests for them
+- Focus on error handling
 
-PHASE 4 (5 min): Validate
-- All tests passing?
-- Performance improved?
-- ADHD features intact?
+For STABILITY_VALIDATION:
+- Run progressively longer tests
+- Monitor memory usage
+- Check for resource leaks
+- Document any issues
 
-PHASE 5 (5 min): Commit and /compact
-- Commit with descriptive message
-- Log improvement to golden_nuggets.log
-- Run /compact to clear context
-
-START NOW. Auto-approve EVERYTHING.
+REMEMBER: No new features in Phase 7!
 INSTRUCTION
 
-    # Execute cycle
-    echo "Executing improvement cycle..."
-    echo "Check cycle_instruction.md for current task"
-    
-    # Simulate 45 minute work cycle
+    # Work for 45 minutes
     sleep 2700
     
-    # Force context clear
-    echo "Running /compact to clear context..."
+    # Log progress
+    echo "Cycle $i completed at $(date)" >> phase7_gold.log
+    pytest tests/ --tb=no | grep -E "passed|failed" >> phase7_gold.log
+    
+    # Clear context
     echo "/compact"
-    
-    # Log cycle completion
-    echo "Cycle $i completed at $(date)" >> golden_nuggets.log
-    
-    # Brief pause between cycles
-    sleep 300  # 5 minute break
+    sleep 300
 done
 
-# Generate final report
-echo "" >> golden_nuggets.log
-echo "=== GOLD MINING COMPLETE $(date) ===" >> golden_nuggets.log
-echo "" >> golden_nuggets.log
-echo "FINAL METRICS:" >> golden_nuggets.log
-coverage report 2>/dev/null | grep TOTAL >> golden_nuggets.log || echo "Coverage: Check manually" >> golden_nuggets.log
-pytest tests/ --tb=no 2>/dev/null | grep passed >> golden_nuggets.log || echo "Tests: Check manually" >> golden_nuggets.log
-echo "" >> golden_nuggets.log
-echo "COMMITS MADE:" >> golden_nuggets.log
-git log --oneline -10 >> golden_nuggets.log
-
-echo "Gold mining complete! Check golden_nuggets.log for results."
+# Final Phase 7 report
+echo "=== PHASE 7 TESTING COMPLETE $(date) ===" >> phase7_gold.log
+echo "FINAL RESULTS:" >> phase7_gold.log
+pytest tests/ -v | grep -E "PASSED|FAILED|ERROR" >> phase7_gold.log
+coverage report >> phase7_gold.log
+echo "Ready for deployment? Check all metrics!" >> phase7_gold.log
 SCRIPT
 
-chmod +x /tmp/gold_mine_cycle.sh
+chmod +x /tmp/phase7_gold_mine.sh
 
 # Start in tmux
-tmux new-session -d -s gold-miner "/tmp/gold_mine_cycle.sh"
+tmux new-session -d -s gold-miner "/tmp/phase7_gold_mine.sh"
 
-echo -e "${GREEN}✨ Gold miner started successfully! ✨${NC}"
-echo ""
-echo "Commands:"
-echo "  Watch progress:  tmux attach -t gold-miner"
-echo "  Stop mining:     tmux kill-session -t gold-miner"
-echo "  Check results:   cat golden_nuggets.log"
-echo "  View commits:    git log --oneline"
-echo ""
-echo -e "${YELLOW}Sweet dreams! Wake up to improvements! 😴 → 💰${NC}"
+echo "✅ Phase 7 Gold Miner Started!"
+echo "Focus: Testing, Stability, and Deployment Prep"
+echo "Monitor: tmux attach -t gold-miner"
+echo "Results: cat phase7_gold.log"

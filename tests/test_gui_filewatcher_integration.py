@@ -46,6 +46,9 @@ class TestGUIFileWatcherIntegration:
         
     def test_new_problem_from_file_updates_queue(self, integrated_window):
         """Test that new problems from files are added to queue."""
+        # Set a current problem so new problem goes to queue instead of loading immediately
+        integrated_window.current_problem = {'id': 'current_problem'}
+        
         initial_queue_size = len(integrated_window.problem_queue)
         
         # Simulate new problem from file watcher
@@ -59,7 +62,7 @@ class TestGUIFileWatcherIntegration:
         
         integrated_window._on_new_problem_from_file(problem_data)
         
-        # Queue should have new problem
+        # Queue should have new problem (since current_problem exists)
         assert len(integrated_window.problem_queue) == initial_queue_size + 1
         assert integrated_window.problem_queue[0]['id'] == 'problem_123'
         

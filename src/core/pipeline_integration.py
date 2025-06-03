@@ -98,10 +98,10 @@ class PDFPipeline:
                 # Record processed file
                 processed_file = ProcessedFile(
                     file_path=pdf_path,
-                    file_name=Path(pdf_path).name,
+                    filename=Path(pdf_path).name,
                     processed_at=datetime.now(),
-                    problems_found=len(problems),
-                    processing_status='completed'
+                    problems_extracted=len(problems),
+                    status='completed'
                 )
                 session.add(processed_file)
                 
@@ -111,10 +111,10 @@ class PDFPipeline:
                         # Create problem record
                         problem = Problem(
                             original_text=problem_data['text'],
-                            source_file=pdf_path,
+                            pdf_source=Path(pdf_path).name,
                             page_number=problem_data.get('page', 1),
                             difficulty=3,  # Default difficulty
-                            created_at=datetime.now()
+                            category=problem_data.get('type', 'general')  # Default category
                         )
                         
                         # Analyze with Claude
@@ -122,7 +122,7 @@ class PDFPipeline:
                         if analysis:
                             problem.translated_text = analysis.get('translated_text', '')
                             problem.difficulty = analysis.get('difficulty', 3)
-                            problem.is_analyzed = True
+                            # Mark as analyzed by setting translated_text
                             analyzed_count += 1
                             
                         session.add(problem)
@@ -182,7 +182,7 @@ class PDFPipeline:
             with self.db_manager.session_scope() as session:
                 existing = session.query(ProcessedFile).filter_by(
                     file_path=pdf_path,
-                    processing_status='completed'
+                    status='completed'
                 ).first()
                 return existing is not None
         except Exception as e:
@@ -230,12 +230,9 @@ class PDFPipeline:
                 return None
                 
             # Analyze with Claude
-            from src.ui.adhd_profile import ADHDProfile
-            profile = ADHDProfile()  # Default profile
-            
             analysis = self.claude_analyzer.analyze_problem(
                 problem={'translated_text': problem_text, 'difficulty': 3},
-                user_profile=profile
+                user_profile=None  # Use default profile
             )
             
             return {
@@ -264,7 +261,7 @@ class PDFPipeline:
                 'difficulty': problem.difficulty,
                 'page_number': problem.page_number,
                 'source': 'pipeline',
-                'is_analyzed': problem.is_analyzed
+                'is_analyzed': bool(problem.translated_text)
             }
             display_problems.append(display_data)
             
@@ -276,11 +273,11 @@ class PDFPipeline:
             with self.db_manager.session_scope() as session:
                 total_files = session.query(ProcessedFile).count()
                 completed_files = session.query(ProcessedFile).filter_by(
-                    processing_status='completed'
+                    status='completed'
                 ).count()
                 total_problems = session.query(Problem).count()
-                analyzed_problems = session.query(Problem).filter_by(
-                    is_analyzed=True
+                analyzed_problems = session.query(Problem).filter(
+                    Problem.translated_text != None
                 ).count()
                 
                 return {

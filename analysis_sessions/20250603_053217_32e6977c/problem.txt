@@ -1,0 +1,18 @@
+PROBLEM METADATA:
+Course: Calculus
+Topic: General
+Difficulty Estimate: medium
+Source: PDF
+Page: Unknown
+
+PROBLEM TEXT:
+Find the derivative of f(x) = sin(x)cos(x).
+
+SPECIAL INSTRUCTIONS:
+- This is for an ADHD student
+- Final semester at Tel Aviv University
+- Prefers visual/concrete explanations
+- Gets overwhelmed by abstract notation
+- Needs dopamine hits from progress
+
+Analyze this problem according to CLAUDE.md instructions.

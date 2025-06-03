@@ -1,0 +1,108 @@
+<!-- prompts/analyze_architecture.xml -->
+<mission>
+Analyze FocusQuest architecture for clean code principles and ADHD optimization.
+Identify architectural debt, dependency issues, and opportunities for improvement.
+</mission>
+
+<current_architecture>
+src/
+├── analysis/         # PDF + Claude processing
+├── core/            # Business logic
+├── database/        # Persistence layer
+├── ui/              # Presentation layer
+└── utils/           # Shared utilities
+</current_architecture>
+
+<perspective_1_dependencies>
+ultrathink about dependency flow and coupling:
+
+1. Are dependencies flowing inward (clean architecture)?
+2. Is the UI depending on business logic or vice versa?
+3. Are there circular dependencies?
+4. Is the database layer properly isolated?
+5. Can we test each layer independently?
+
+Key principle: Dependencies should flow inward from UI → Core → Domain
+</perspective_1_dependencies>
+
+<perspective_2_solid_principles>
+think hard about SOLID violations:
+
+S - Single Responsibility: Which classes do too much?
+O - Open/Closed: Can we extend without modifying?
+L - Liskov Substitution: Are interfaces properly designed?
+I - Interface Segregation: Are interfaces too fat?
+D - Dependency Inversion: Are we depending on abstractions?
+</perspective_2_solid_principles>
+
+<perspective_3_adhd_cognitive_load>
+think about cognitive load for ADHD developers:
+
+1. Is file organization intuitive?
+2. Are class names self-documenting?
+3. Is the flow easy to follow?
+4. Are there too many abstraction layers?
+5. Can a developer with ADHD quickly understand the codebase?
+</perspective_3_adhd_cognitive_load>
+
+<research_phase>
+# Generate dependency graph
+pip install pydeps
+python -m pydeps src --max-bacon=2 --cluster -o deps.svg
+
+# Find circular dependencies
+python -m pyflakes src/
+
+# Measure complexity
+pip install radon
+radon cc src/ -a -nb
+
+# Check for code smells
+pip install pylint
+pylint src/ --disable=all --enable=R
+
+# Analyze cohesion
+radon mi src/ -s
+
+# Check type coverage
+mypy src/ --ignore-missing-imports --html-report mypy_report
+</research_phase>
+
+<analysis_commands>
+# Find god classes (>300 lines)
+find src/ -name "*.py" -exec wc -l {} + | sort -rn | head -20
+
+# Find high coupling
+grep -r "from src\." src/ | cut -d: -f1 | sort | uniq -c | sort -rn
+
+# Find mixed responsibilities  
+grep -r "class\|def" src/ | grep -i "and\|plus\|also" | head -20
+
+# Check test coverage by module
+pytest --cov=src --cov-report=html
+firefox htmlcov/index.html
+</analysis_commands>
+
+<output_format>
+## Architectural Analysis Report
+
+### Dependency Health
+- Inward dependencies: X/Y
+- Circular dependencies: [list]
+- Suggested refactorings: [list]
+
+### SOLID Compliance
+- SRP violations: [list]
+- OCP opportunities: [list]
+- DIP candidates: [list]
+
+### ADHD Optimization Score
+- File organization: X/10
+- Naming clarity: X/10
+- Cognitive load: X/10
+
+### Recommendations
+1. Immediate fixes
+2. Medium-term improvements
+3. Long-term architecture goals
+</output_format>

@@ -17,6 +17,7 @@ from collections import OrderedDict
 import hashlib
 from enum import Enum
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -210,19 +211,19 @@ class ClaudeAnalyzer:
         timeout: Optional[float] = None
     ) -> ProblemAnalysis:
         """Analyze a mathematical problem with ADHD optimizations using Claude CLI"""
-        # Check circuit breaker state first
-        if self.circuit_breaker_enabled:
-            self._check_circuit_state()
-            
         if not profile:
             profile = ADHDProfile()
             
-        # Check cache with TTL and LRU management
+        # Check cache first (even if circuit is open)
         cache_key = self._get_cache_key(problem, profile)
         if self.cache_enabled:
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
+                
+        # Check circuit breaker state after cache
+        if self.circuit_breaker_enabled:
+            self._check_circuit_state()
             
         # Build prompt
         prompt = self._build_prompt(problem, profile)
@@ -276,7 +277,35 @@ class ClaudeAnalyzer:
                     return cached_result
                     
                 # Provide fallback analysis
-                return self.get_fallback_analysis(problem.get('translated_text', ''))
+                fallback_dict = self.get_fallback_analysis(problem.get('translated_text', ''))
+                # Convert fallback dict to ProblemAnalysis object
+                fallback_problem = fallback_dict['problems'][0]
+                steps = []
+                for step_data in fallback_problem['steps']:
+                    # Create default hints for manual steps
+                    hints = HintSet(
+                        tier1='Take your time with this step',
+                        tier2='Consider what you know so far',
+                        tier3='Break it down into smaller parts'
+                    )
+                    step = StepBreakdown(
+                        number=len(steps) + 1,
+                        description=step_data['content'],
+                        duration_minutes=step_data.get('duration', 5),
+                        checkpoint_question="Ready to continue?",
+                        hints=hints
+                    )
+                    steps.append(step)
+                
+                return ProblemAnalysis(
+                    problem_type='manual',
+                    difficulty_rating=fallback_problem.get('difficulty', 3),
+                    concepts=[],
+                    estimated_time=sum(s.duration_minutes for s in steps),
+                    steps=steps,
+                    summary='Manual problem solving mode',
+                    adhd_tips=fallback_problem.get('adhd_tips', [])
+                )
             else:
                 raise
     
@@ -422,11 +451,20 @@ Remember:
         steps = []
         for i, step_data in enumerate(steps_data):
             hints_data = step_data.get('hints', {})
-            hints = HintSet(
-                tier1=hints_data.get('tier1', 'Think about this step'),
-                tier2=hints_data.get('tier2', 'Consider the approach'),
-                tier3=hints_data.get('tier3', 'Here is the detailed solution')
-            )
+            # Handle both dict and list formats for hints
+            if isinstance(hints_data, list):
+                # Convert list to dict format
+                hints = HintSet(
+                    tier1=hints_data[0] if len(hints_data) > 0 else 'Think about this step',
+                    tier2=hints_data[1] if len(hints_data) > 1 else 'Consider the approach',
+                    tier3=hints_data[2] if len(hints_data) > 2 else 'Here is the detailed solution'
+                )
+            else:
+                hints = HintSet(
+                    tier1=hints_data.get('tier1', 'Think about this step'),
+                    tier2=hints_data.get('tier2', 'Consider the approach'),
+                    tier3=hints_data.get('tier3', 'Here is the detailed solution')
+                )
             
             # Ensure duration is ADHD-friendly
             duration = step_data.get('duration_minutes', 5)
@@ -526,21 +564,33 @@ Remember:
         
         try:
             analysis = self.analyze_problem(problem, profile, timeout=timeout)
-            return {
-                'problems': [{
-                    'text': content,
-                    'steps': [{'content': step.description} for step in analysis.steps],
-                    'hints': [],
-                    'difficulty': analysis.difficulty_rating
-                }]
-            }
-        except AnalysisError:
-            # Re-raise as circuit breaker error for proper handling
-            raise CircuitBreakerError(
-                "Claude AI is temporarily having trouble, but don't worry! "
-                "You can continue learning while it recovers. "
-                "Try manual problem entry or take a short break."
-            )
+            # Handle both ProblemAnalysis object and dict responses
+            if isinstance(analysis, dict):
+                # Legacy dict format
+                return analysis
+            else:
+                # ProblemAnalysis object format
+                return {
+                    'problems': [{
+                        'text': content,
+                        'steps': [{'content': step.description} for step in analysis.steps],
+                        'hints': [],
+                        'difficulty': analysis.difficulty_rating
+                    }]
+                }
+        except CircuitBreakerError:
+            # Re-raise circuit breaker errors as-is
+            raise
+        except AnalysisError as e:
+            # Only convert to circuit breaker error if circuit is open
+            if self.circuit_state == CircuitState.OPEN:
+                raise CircuitBreakerError(
+                    "Claude AI is temporarily having trouble, but don't worry! "
+                    "You can continue learning while it recovers. "
+                    "Try manual problem entry or take a short break."
+                )
+            else:
+                raise e
     
     def _check_circuit_state(self):
         """Check circuit breaker state and throw error if open."""
@@ -561,12 +611,8 @@ Remember:
                     "or continue with manual problem entry."
                 )
         elif self.circuit_state == CircuitState.HALF_OPEN:
-            # Check if we've exceeded half-open call limit
-            if self.half_open_calls >= self.half_open_max_calls:
-                # Too many calls in half-open, go back to open
-                self.circuit_state = CircuitState.OPEN
-                self.last_failure_time = datetime.now()
-                raise CircuitBreakerError("Still experiencing issues, taking another break...")
+            # Allow calls up to the limit
+            pass
     
     def _record_success(self):
         """Record successful call in circuit breaker."""

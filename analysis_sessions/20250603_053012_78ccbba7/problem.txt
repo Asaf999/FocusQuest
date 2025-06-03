@@ -1,0 +1,18 @@
+PROBLEM METADATA:
+Course: Test Course
+Topic: General
+Difficulty Estimate: medium
+Source: PDF
+Page: Unknown
+
+PROBLEM TEXT:
+Test problem
+
+SPECIAL INSTRUCTIONS:
+- This is for an ADHD student
+- Final semester at Tel Aviv University
+- Prefers visual/concrete explanations
+- Gets overwhelmed by abstract notation
+- Needs dopamine hits from progress
+
+Analyze this problem according to CLAUDE.md instructions.

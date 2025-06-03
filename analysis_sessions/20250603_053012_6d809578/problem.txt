@@ -1,0 +1,24 @@
+PROBLEM METADATA:
+Course: Real Analysis
+Topic: Functional Equations
+Difficulty Estimate: medium
+Source: PDF
+Page: Unknown
+
+PROBLEM TEXT:
+
+Let f: R → R be a continuous function such that f(x+y) = f(x) + f(y) 
+for all x, y ∈ R. Prove that f(x) = cx for some constant c.
+
+This is known as Cauchy's functional equation. Provide a proof suitable
+for an ADHD student, breaking it down into manageable steps.
+
+
+SPECIAL INSTRUCTIONS:
+- This is for an ADHD student
+- Final semester at Tel Aviv University
+- Prefers visual/concrete explanations
+- Gets overwhelmed by abstract notation
+- Needs dopamine hits from progress
+
+Analyze this problem according to CLAUDE.md instructions.

@@ -2,7 +2,7 @@
 import pytest
 import sys
 from unittest.mock import Mock, patch, MagicMock
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 
 # Ensure QApplication exists
@@ -23,16 +23,34 @@ class TestDatabaseUISync:
             with patch('src.ui.file_watcher_integration.EnhancedFileWatcher'):
                 with patch('src.ui.file_watcher_integration.QueueProcessor'):
                     with patch('src.core.state_synchronizer.DatabaseManager'):
-                        window = FocusQuestSyncWindow()
-                        qtbot.addWidget(window)
-                        
-                        # Stop timers for testing
-                        if hasattr(window, 'queue_timer'):
-                            window.queue_timer.stop()
-                        if hasattr(window.state_sync, 'auto_save_timer'):
-                            window.state_sync.auto_save_timer.stop()
-                            
-                        return window
+                        # Patch state synchronizer methods before window creation
+                        with patch('src.core.state_synchronizer.StateSynchronizer.initialize_user') as mock_init:
+                            with patch('src.core.state_synchronizer.StateSynchronizer.start_session') as mock_start:
+                                mock_init.return_value = {
+                                    'user_id': 1,
+                                    'username': 'default',
+                                    'level': 1,
+                                    'total_xp': 0
+                                }
+                                mock_start.return_value = 1
+                                
+                                window = FocusQuestSyncWindow()
+                                qtbot.addWidget(window)
+                                
+                                # Stop timers for testing
+                                if hasattr(window, 'queue_timer'):
+                                    window.queue_timer.stop()
+                                if hasattr(window.state_sync, 'auto_save_timer'):
+                                    window.state_sync.auto_save_timer.stop()
+                                
+                                # Stop any XP animations
+                                if hasattr(window, 'xp_widget') and window.xp_widget:
+                                    if hasattr(window.xp_widget, 'opacity_anim'):
+                                        window.xp_widget.opacity_anim.stop()
+                                    # Clear any pending timers
+                                    QTimer.singleShot(0, lambda: None)  # Process events
+                                    
+                                return window
     
     def test_window_initializes_user_session(self, sync_window):
         """Test that window initializes user and session on startup."""
@@ -66,7 +84,8 @@ class TestDatabaseUISync:
             'steps': []
         }
         
-        with patch.object(sync_window, 'problem_widget'):
+        # Mock the parent class's load_problem to avoid widget manipulation
+        with patch.object(sync_window.__class__.__bases__[0], 'load_problem'):
             sync_window.load_problem(problem_data)
             
         # Should start attempt
@@ -86,7 +105,7 @@ class TestDatabaseUISync:
         })
         
         # Complete problem
-        sync_window._on_problem_completed()
+        sync_window.on_problem_completed(123)
         
         # Should save completion with XP
         sync_window.state_sync.complete_problem.assert_called_once()

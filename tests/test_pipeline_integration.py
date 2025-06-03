@@ -135,13 +135,18 @@ class TestPDFPipeline:
         # Mock PDF processor
         pipeline.pdf_processor.process_pdf = Mock(return_value=["Page 1"])
         pipeline.pdf_processor.extract_problems = Mock(return_value=[
-            {'text': 'Problem 1'},
-            {'text': 'Problem 2'}
+            {'text': 'Calculate the integral of x^2 from 0 to 5'},
+            {'text': 'Find the derivative of sin(x) * cos(x)'}
         ])
         
         # Mock Claude analyzer to fail on first, succeed on second
+        mock_analysis = Mock()
+        mock_analysis.difficulty_rating = 3
+        mock_analysis.steps = []
+        mock_analysis.hints = Mock(tier1="", tier2="", tier3="")
+        
         pipeline.claude_analyzer.analyze_problem = Mock(
-            side_effect=[Exception("Claude error"), Mock(difficulty_rating=3)]
+            side_effect=[Exception("Claude error"), mock_analysis]
         )
         
         # Mock database
@@ -165,7 +170,7 @@ class TestPDFPipeline:
                 translated_text="Translated 1",
                 difficulty=3,
                 page_number=1,
-                is_analyzed=True
+                category="algebra"
             ),
             Problem(
                 id=2,
@@ -173,7 +178,7 @@ class TestPDFPipeline:
                 translated_text=None,  # No translation
                 difficulty=4,
                 page_number=2,
-                is_analyzed=False
+                category="calculus"
             )
         ]
         
@@ -199,8 +204,9 @@ class TestPDFPipeline:
         _, mock_session = mock_db_manager
         
         # Mock query results
-        mock_session.query.return_value.count.side_effect = [10, 20, 15]
-        mock_session.query.return_value.filter_by.return_value.count.side_effect = [8]
+        mock_session.query.return_value.count.side_effect = [10, 20]
+        mock_session.query.return_value.filter_by.return_value.count.return_value = 8
+        mock_session.query.return_value.filter.return_value.count.return_value = 15
         
         # Get stats
         stats = pipeline.get_processing_stats()

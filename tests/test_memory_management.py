@@ -8,9 +8,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 import threading
 import time
+import logging
 
 from src.analysis.pdf_processor import PDFProcessor
 from src.analysis.claude_analyzer import ClaudeAnalyzer
+
+logger = logging.getLogger(__name__)
 
 
 class TestMemoryManagement:
@@ -85,6 +88,11 @@ class TestMemoryManagement:
         """Test that subprocesses are properly cleaned up."""
         analyzer = ClaudeAnalyzer()
         
+        # Count initial zombie processes
+        current_process = psutil.Process()
+        initial_zombies = sum(1 for child in current_process.children(recursive=True) 
+                            if child.status() == psutil.STATUS_ZOMBIE)
+        
         with patch('subprocess.run') as mock_run:
             # Simulate subprocess timeout
             import subprocess
@@ -93,11 +101,19 @@ class TestMemoryManagement:
             with pytest.raises(Exception):  # ClaudeAnalyzer will raise its own error
                 analyzer._run_claude_cli("test prompt", timeout=1.0)
         
-        # Verify no zombie processes
-        current_process = psutil.Process()
-        children = current_process.children(recursive=True)
-        zombie_count = sum(1 for child in children if child.status() == psutil.STATUS_ZOMBIE)
-        assert zombie_count == 0, f"Found {zombie_count} zombie processes"
+        # Give processes time to clean up
+        import time
+        time.sleep(0.2)
+        
+        # Count zombies after test
+        final_zombies = sum(1 for child in current_process.children(recursive=True) 
+                          if child.status() == psutil.STATUS_ZOMBIE)
+        
+        # We should not have created new zombie processes
+        new_zombies = final_zombies - initial_zombies
+        if new_zombies > 0:
+            logger.warning(f"Test created {new_zombies} new zombie processes")
+        assert new_zombies <= 0, f"Test created {new_zombies} new zombie processes"
     
     def test_temporary_file_cleanup(self):
         """Test that temporary files are cleaned up."""

@@ -1,0 +1,755 @@
+<!-- prompts/refactor_and_fix_tests.xml -->
+<mission>
+Fix 37 failing tests and perform minimal refactoring to prepare FocusQuest for deployment.
+Transform test suite from 86.2% passing to 100% passing with 85%+ coverage.
+Time budget: 9-11 hours to production-ready.
+</mission>
+
+<mathematical_model>
+Test Health Score = (Pass_Rate × Coverage × Speed) / (Flakiness × Maintenance_Cost)
+
+Current State:
+- Pass_Rate = 232/269 = 0.862
+- Coverage = 0.75
+- Speed = Unknown (GUI tests slow)
+- Flakiness = High (segfaults)
+- Maintenance_Cost = High (outdated mocks)
+
+Target State:
+- Pass_Rate = 1.0
+- Coverage = 0.85+
+- Speed < 60s for unit tests
+- Flakiness = 0
+- Maintenance_Cost = Low
+</mathematical_model>
+
+<current_state>
+Project Root: /home/puncher/focusquest
+Python: 3.13 + PyQt6 6.9.0 + SQLAlchemy + pytest 8.3.5
+
+Test Results: 232/269 passing (86.2%)
+Coverage: 75% (target 85%)
+Core functionality: WORKING ✅
+Main issue: Tests written against prototypes, code evolved beyond them
+
+FAILING TESTS BREAKDOWN:
+- Database UI Sync: 11 errors
+- Circuit Breaker: 8 failures  
+- Skip Problem: 8 failures
+- GUI Integration: 4 failures + segfault
+- State Synchronizer: 6 failures
+TOTAL: 37 failures
+</current_state>
+
+<perspective_1_test_archaeology>
+ultrathink about why these specific tests are failing:
+
+The test failures reveal a fascinating pattern: the code has evolved to a MORE SOPHISTICATED architecture than when the tests were written. This is unusual - typically code degrades, but here it improved:
+
+1. User.level → User.progress.level: Better separation of concerns, following SRP
+2. dict → ProblemAnalysis object: Type safety and domain modeling
+3. current_problem_id → current_problem: Object references over IDs
+4. Direct field access → relationship traversal: Proper ORM usage
+
+The tests are failing because they expect the OLD, WORSE design. The solution isn't to fix the code - it's to upgrade the tests to match the better architecture.
+
+This is actually a POSITIVE sign of healthy refactoring that happened without updating tests.
+</perspective_1_test_archaeology>
+
+<perspective_2_mock_psychology>
+think hard about mock object design philosophy:
+
+CURRENT MOCK PROBLEMS:
+1. Mocks return wrong types (MagicMock instead of int)
+2. Mocks don't match actual object relationships
+3. Mocks are created ad-hoc in each test
+4. No central source of truth for mock data
+
+PROPER MOCK DESIGN:
+1. Mocks should mirror production objects exactly
+2. Use factories for consistent mock creation
+3. Type hints on mocks for IDE support
+4. Separate fixture files by domain
+
+The mocks are lying to the tests, causing false failures.
+</perspective_2_mock_psychology>
+
+<perspective_3_adhd_testing_needs>
+think about testing from ADHD developer perspective:
+
+1. Fast feedback loops: Unit tests must run in <5s
+2. Clear error messages: "Expected X, got Y" not cryptic traces
+3. Visual test results: Green/red progress bars
+4. Grouped failures: Similar issues together
+5. Quick fix patterns: Copy-paste solutions
+
+Current test suite violates all these principles with slow GUI tests, cryptic mock errors, and scattered failures.
+</perspective_3_adhd_testing_needs>
+
+<research_phase>
+Execute these commands to understand the test failure patterns. Don't fix anything yet:
+
+# Map test failures to root causes
+pytest --lf --tb=short | grep -E "FAILED|ERROR" > test_failures.txt
+cat test_failures.txt | cut -d: -f1 | sort | uniq -c
+
+# Understand the User model evolution
+grep -A 20 "class User" src/database/models.py
+grep -A 10 "class UserProgress" src/database/models.py
+
+# See how tests expect old structure
+grep -r "user\.level\|user\.total_xp" tests/ --include="*.py"
+
+# Find where ProblemAnalysis is defined vs how tests mock it
+grep -A 30 "class ProblemAnalysis" src/analysis/claude_analyzer.py
+grep -r "problem.*=.*{" tests/ --include="*.py" | grep -v ".pyc"
+
+# Identify GUI test problems
+grep -r "@pytest.mark.gui\|QtWidgets\|QApplication" tests/ --include="*.py"
+
+# Check current fixture setup
+cat tests/conftest.py 2>/dev/null || echo "No conftest.py found!"
+
+# Analyze import patterns in tests
+find tests/ -name "*.py" -exec grep -l "from unittest.mock import" {} \; | wc -l
+find tests/ -name "*.py" -exec grep -l "from src\." {} \; | head -10
+</research_phase>
+
+<planning_phase>
+Create surgical fix strategy based on failure patterns:
+
+PHASE 1 - Test Infrastructure (1 hour):
+1. Create comprehensive tests/conftest.py
+2. Add pytest-qt fixtures for GUI tests
+3. Configure pytest markers
+4. Set up proper test database
+5. Add mock factories
+
+PHASE 2 - Fix Mock Mismatches (2 hours):
+1. Database UI Sync: Create proper User+UserProgress mocks
+2. Circuit Breaker: Mock ProblemAnalysis objects
+3. Skip Problem: Update to current_problem API
+4. State Sync: Fix field access patterns
+5. Create reusable mock builders
+
+PHASE 3 - GUI Test Isolation (1 hour):
+1. Add headless Qt configuration
+2. Implement proper app lifecycle
+3. Mock heavy UI operations
+4. Add xvfb configuration
+5. Separate GUI from logic tests
+
+PHASE 4 - Minimal Refactoring (2 hours):
+1. Consolidate entry points
+2. Merge window classes
+3. Extract configuration
+4. Organize test directories
+5. Remove placeholder tests
+
+PHASE 5 - Coverage Improvement (1 hour):
+1. Identify uncovered code paths
+2. Add missing edge case tests
+3. Test error handling paths
+4. Add integration tests
+5. Document test patterns
+</planning_phase>
+
+<implementation_phase>
+Fix tests systematically with concrete solutions:
+
+STEP 1: Create Master Test Configuration
+```python
+# tests/conftest.py
+import pytest
+import sys
+from unittest.mock import Mock, MagicMock, create_autospec
+from datetime import datetime
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.database.models import User, UserProgress, Problem, Session
+from src.analysis.claude_analyzer import ProblemAnalysis, ProblemStep, StepHints
+
+# ===== Qt Fixtures =====
+@pytest.fixture(scope="session")
+def qapp():
+    """Single QApplication for all tests"""
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
+    
+    # Disable animations for faster tests
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DisableHighDpiScaling)
+    
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)  # Prevent premature exit
+    
+    yield app
+    
+    # Cleanup
+    app.closeAllWindows()
+    app.quit()
+
+@pytest.fixture
+def qtbot(qapp, qtbot):
+    """Enhanced qtbot with ADHD-friendly defaults"""
+    qtbot.setDefaultTimeout(100)  # Fast feedback
+    return qtbot
+
+# ===== Mock Factories =====
+class MockFactory:
+    """Central factory for consistent mocks"""
+    
+    @staticmethod
+    def create_user_with_progress(level=1, xp=100, streak=5):
+        """User with proper UserProgress relationship"""
+        user = create_autospec(User, instance=True)
+        user.id = 1
+        user.username = "test_user"
+        user.created_at = datetime.now()
+        
+        progress = create_autospec(UserProgress, instance=True)
+        progress.user_id = user.id
+        progress.level = level  # INT not Mock!
+        progress.total_xp = xp
+        progress.current_xp = xp % 100
+        progress.streak_days = streak
+        progress.last_seen = datetime.now()
+        
+        # Set up bidirectional relationship
+        user.progress = progress
+        progress.user = user
+        
+        return user
+    
+    @staticmethod
+    def create_problem_analysis(difficulty="medium", steps=3):
+        """Proper ProblemAnalysis object"""
+        return ProblemAnalysis(
+            problem_id=f"test_{datetime.now().timestamp()}",
+            original_text="∫(x²+1)dx = ?",
+            difficulty=difficulty,
+            steps=[
+                ProblemStep(
+                    order=i,
+                    description=f"Step {i}: {'Understand' if i==1 else 'Solve' if i==2 else 'Verify'}",
+                    hints=StepHints(
+                        tier1=f"Hint {i}.1: Think about the approach",
+                        tier2=f"Hint {i}.2: Try this method",
+                        tier3=f"Hint {i}.3: The answer involves x³/3"
+                    )
+                ) for i in range(1, steps + 1)
+            ],
+            time_estimate=15,
+            concepts=["integration", "polynomials"]
+        )
+    
+    @staticmethod
+    def create_session_with_problem():
+        """Session with current_problem object reference"""
+        session = create_autospec(Session, instance=True)
+        session.id = 1
+        session.user_id = 1
+        session.started_at = datetime.now()
+        
+        problem = create_autospec(Problem, instance=True)
+        problem.id = "prob_123"
+        problem.title = "Integration Problem"
+        problem.difficulty = "medium"
+        
+        # Object reference, not ID!
+        session.current_problem = problem
+        session.problems_completed = 0
+        session.problems_skipped = 0
+        
+        return session
+
+# ===== Fixture Shortcuts =====
+@pytest.fixture
+def mock_user():
+    return MockFactory.create_user_with_progress()
+
+@pytest.fixture
+def mock_problem():
+    return MockFactory.create_problem_analysis()
+
+@pytest.fixture
+def mock_session():
+    return MockFactory.create_session_with_problem()
+
+# ===== Test Markers =====
+def pytest_configure(config):
+    """Register custom markers"""
+    config.addinivalue_line("markers", "gui: Tests requiring Qt GUI")
+    config.addinivalue_line("markers", "slow: Tests taking >1s")
+    config.addinivalue_line("markers", "integration: Database integration tests")
+    config.addinivalue_line("markers", "unit: Fast unit tests")
+    config.addinivalue_line("markers", "adhd: ADHD-specific feature tests")
+
+# ===== Performance Tracking =====
+@pytest.fixture(autouse=True)
+def track_test_performance(request):
+    """ADHD-friendly test speed tracking"""
+    start = datetime.now()
+    yield
+    duration = (datetime.now() - start).total_seconds()
+    
+    if duration > 1.0 and "slow" not in request.keywords:
+        pytest.warning(f"Test {request.node.name} took {duration:.2f}s - mark as @pytest.mark.slow")
+
+# ===== GUI Test Helpers =====
+@pytest.fixture
+def gui_environment(qapp, monkeypatch, tmp_path):
+    """Complete GUI test environment"""
+    # Prevent blocking
+    monkeypatch.setattr("PyQt6.QtWidgets.QApplication.exec", lambda: 0)
+    
+    # Set test data directory
+    test_data = tmp_path / "test_data"
+    test_data.mkdir()
+    monkeypatch.setenv("FOCUSQUEST_DATA_DIR", str(test_data))
+    
+    # Disable animations for speed
+    monkeypatch.setenv("QT_QUICK_ANIMATIONS_FACTOR", "0")
+    
+    yield qapp
+
+# ===== Database Fixtures =====
+@pytest.fixture
+def test_db(tmp_path):
+    """Isolated test database"""
+    from sqlalchemy import create_engine
+    from src.database.models import Base
+    
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    
+    yield engine
+    
+    # Cleanup
+    engine.dispose()
+```
+
+STEP 2: Fix Specific Test Categories
+
+```python
+# tests/test_database_ui_sync_fixed.py
+import pytest
+from unittest.mock import patch, Mock
+
+class TestDatabaseUISync:
+    """Fixed tests using proper mocks"""
+    
+    @pytest.fixture
+    def window_with_mocks(self, qtbot, mock_user, gui_environment):
+        """Window with all mocks properly configured"""
+        with patch('src.ui.main_window_with_sync.DatabaseManager') as mock_db:
+            # Configure database mock
+            mock_db.return_value.get_user.return_value = mock_user
+            mock_db.return_value.get_session.return_value.__enter__ = Mock()
+            mock_db.return_value.get_session.return_value.__exit__ = Mock()
+            
+            with patch('src.ui.main_window_with_sync.StateSynchronizer') as mock_sync:
+                # Configure state sync mock
+                mock_sync.return_value.initialize_user.return_value = {
+                    'id': mock_user.id,
+                    'username': mock_user.username,
+                    'level': mock_user.progress.level,  # Access through progress!
+                    'total_xp': mock_user.progress.total_xp,
+                    'streak_days': mock_user.progress.streak_days
+                }
+                
+                # Import here to avoid import errors
+                from src.ui.main_window_with_sync import FocusQuestSyncWindow
+                
+                window = FocusQuestSyncWindow()
+                qtbot.addWidget(window)
+                
+                # Attach mocks for assertions
+                window._mock_db = mock_db
+                window._mock_sync = mock_sync
+                
+                return window
+    
+    def test_window_initializes_user_session(self, window_with_mocks):
+        """Test proper initialization with User.progress.level"""
+        window = window_with_mocks
+        
+        # Verify XP widget got correct level from User.progress
+        assert window.xp_widget.current_level == 1
+        assert window._mock_sync.return_value.initialize_user.called
+
+# tests/test_circuit_breaker_fixed.py
+class TestCircuitBreaker:
+    """Fixed circuit breaker tests expecting objects not dicts"""
+    
+    @pytest.fixture
+    def analyzer_with_mocks(self, mock_problem):
+        """Analyzer that returns proper objects"""
+        from src.analysis.claude_analyzer import ClaudeAnalyzer
+        
+        analyzer = ClaudeAnalyzer()
+        
+        # Mock the CLI call to return proper JSON
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value.stdout = mock_problem.to_json()
+            mock_run.return_value.returncode = 0
+            
+            yield analyzer
+    
+    def test_circuit_transitions_to_half_open(self, analyzer_with_mocks, mock_problem):
+        """Test with proper ProblemAnalysis object"""
+        analyzer = analyzer_with_mocks
+        
+        # Should return ProblemAnalysis, not dict
+        result = analyzer.analyze_problem("test")
+        
+        assert isinstance(result, ProblemAnalysis)
+        assert result.difficulty == mock_problem.difficulty
+        assert len(result.steps) == len(mock_problem.steps)
+```
+
+STEP 3: Consolidate Entry Points
+
+```python
+# src/__main__.py - Unified entry point
+#!/usr/bin/env python3
+"""
+FocusQuest - ADHD Math Learning RPG
+Single entry point for all execution modes
+"""
+import sys
+import argparse
+import logging
+from pathlib import Path
+from typing import Optional
+
+def setup_logging(debug: bool = False):
+    """Configure ADHD-friendly logging"""
+    level = logging.DEBUG if debug else logging.INFO
+    
+    # Simple format for ADHD readability
+    format_str = '%(asctime)s [%(levelname)s] %(message)s'
+    
+    logging.basicConfig(
+        level=level,
+        format=format_str,
+        datefmt='%H:%M:%S'  # Just time, not full date
+    )
+
+def run_gui_mode(config_path: Optional[Path] = None):
+    """Run the full GUI application"""
+    from PyQt6.QtWidgets import QApplication
+    from src.ui.main_window import FocusQuestWindow
+    from src.config import Config
+    
+    app = QApplication(sys.argv)
+    app.setApplicationName("FocusQuest")
+    app.setOrganizationName("TAU ADHD Learning")
+    
+    # Load configuration
+    config = Config.from_file(config_path) if config_path else Config.from_env()
+    
+    # Create and show main window
+    window = FocusQuestWindow(config)
+    window.show()
+    
+    # Start file watcher
+    window.start_file_watcher()
+    
+    return app.exec()
+
+def run_headless_mode(config_path: Optional[Path] = None):
+    """Run just the file watcher service"""
+    from src.core.file_watcher import FileWatcherService
+    from src.config import Config
+    
+    config = Config.from_file(config_path) if config_path else Config.from_env()
+    
+    print("Starting FocusQuest in headless mode...")
+    print(f"Watching: {config.processing.inbox_dir}")
+    print("Press Ctrl+C to stop")
+    
+    service = FileWatcherService(config)
+    
+    try:
+        service.run()
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+        service.stop()
+
+def run_smoke_test():
+    """Quick test to verify installation"""
+    try:
+        # Test imports
+        from src.database.models import User
+        from src.analysis.claude_analyzer import ClaudeAnalyzer
+        from src.ui.main_window import FocusQuestWindow
+        
+        print("✅ All imports successful")
+        
+        # Test configuration
+        from src.config import Config
+        config = Config.from_env()
+        print(f"✅ Configuration loaded")
+        print(f"   - Session duration: {config.adhd.session_duration_min} min")
+        print(f"   - Inbox: {config.processing.inbox_dir}")
+        
+        # Test database
+        from sqlalchemy import create_engine
+        engine = create_engine("sqlite:///:memory:")
+        print("✅ Database connection successful")
+        
+        print("\n🎉 FocusQuest is ready to use!")
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Smoke test failed: {e}")
+        return 1
+
+def main():
+    """Main entry point with mode detection"""
+    parser = argparse.ArgumentParser(
+        description="FocusQuest - ADHD Math Learning RPG",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  focusquest                    # Run GUI (default)
+  focusquest --headless         # Run file watcher only
+  focusquest --smoke-test       # Test installation
+  focusquest --debug            # Run with debug logging
+        """
+    )
+    
+    parser.add_argument(
+        '--headless', 
+        action='store_true',
+        help='Run without GUI (file watcher only)'
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=Path,
+        help='Path to configuration file'
+    )
+    
+    parser.add_argument(
+        '--smoke-test',
+        action='store_true',
+        help='Run quick test to verify installation'
+    )
+    
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug logging'
+    )
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    setup_logging(args.debug)
+    
+    # Route to appropriate mode
+    if args.smoke_test:
+        return run_smoke_test()
+    elif args.headless:
+        return run_headless_mode(args.config)
+    else:
+        return run_gui_mode(args.config)
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+STEP 4: Test Organization Script
+
+```bash
+#!/bin/bash
+# scripts/organize_tests.sh
+
+echo "🧹 Organizing tests for ADHD-friendly structure..."
+
+# Create directory structure
+mkdir -p tests/{unit,integration,e2e,fixtures,performance}
+
+# Move tests to appropriate categories
+echo "📦 Categorizing tests..."
+
+# Unit tests (fast, no dependencies)
+for test in test_models test_utils test_hints test_claude_analyzer; do
+    [ -f "tests/${test}.py" ] && git mv "tests/${test}.py" tests/unit/
+done
+
+# Integration tests (database, file system)
+for test in test_database test_file_watcher test_pipeline test_state_sync; do
+    [ -f "tests/${test}.py" ] && git mv "tests/${test}.py" tests/integration/
+done
+
+# E2E tests (full workflows, GUI)
+for test in test_gui test_integration test_skip_problem; do
+    [ -f "tests/${test}.py" ] && git mv "tests/${test}.py" tests/e2e/
+done
+
+# Remove placeholder tests
+echo "🗑️  Removing placeholder tests..."
+rm -f tests/test_fix[1-8]_*.py
+
+# Create __init__.py files
+touch tests/{unit,integration,e2e,fixtures,performance}/__init__.py
+
+# Create test runner shortcuts
+cat > tests/run_unit.sh << 'EOF'
+#!/bin/bash
+# Run fast unit tests for quick feedback
+pytest tests/unit -v --tb=short --durations=10
+EOF
+
+cat > tests/run_integration.sh << 'EOF'
+#!/bin/bash  
+# Run integration tests
+pytest tests/integration -v --tb=short
+EOF
+
+cat > tests/run_e2e.sh << 'EOF'
+#!/bin/bash
+# Run end-to-end tests with GUI
+xvfb-run -a pytest tests/e2e -v --tb=short
+EOF
+
+chmod +x tests/run_*.sh
+
+echo "✅ Test organization complete!"
+echo "   - Unit tests: tests/unit/ (run with: ./tests/run_unit.sh)"
+echo "   - Integration: tests/integration/ (run with: ./tests/run_integration.sh)"  
+echo "   - E2E tests: tests/e2e/ (run with: ./tests/run_e2e.sh)"
+```
+</implementation_phase>
+
+<integration_phase>
+Verify fixes work correctly:
+
+# Step-by-step verification
+1. First, verify conftest.py works:
+   pytest --collect-only | grep fixture
+   
+2. Run unit tests (should be fast):
+   time pytest tests/unit -v
+   # Should complete in <5 seconds
+   
+3. Fix remaining failures one by one:
+   pytest --lf -x -vvs
+   # Fix, commit, repeat
+   
+4. Check coverage improved:
+   pytest --cov=src --cov-report=html
+   open htmlcov/index.html
+   
+5. Run full test suite:
+   pytest tests/ -v --tb=short
+   
+6. Verify ADHD features:
+   pytest tests/ -k "adhd" -v
+</integration_phase>
+
+<parallel_execution>
+For maximum efficiency, run in 4 terminals:
+
+Terminal 1: Fix test infrastructure
+cd /home/puncher/focusquest
+$EDITOR tests/conftest.py  # Create from template above
+pytest --collect-only  # Verify fixtures load
+
+Terminal 2: Fix failing tests
+pytest --lf -x  # Fix one at a time
+# After each fix:
+git add -p && git commit -m "Test: Fix [specific test]"
+
+Terminal 3: Monitor progress  
+watch -n 2 'pytest --tb=no | tail -20'
+
+Terminal 4: Check coverage
+watch -n 10 'pytest tests/unit --cov=src --cov-report=term | grep TOTAL'
+</parallel_execution>
+
+<verification_commands>
+# After all fixes, run comprehensive verification:
+
+# 1. All tests pass
+pytest tests/ -v --tb=short
+
+# 2. Coverage target met
+pytest --cov=src --cov-report=term-missing | grep TOTAL
+# Should show 85%+
+
+# 3. Performance acceptable  
+pytest tests/unit --durations=10
+# No test over 0.1s except marked @slow
+
+# 4. GUI tests work headless
+xvfb-run -a pytest tests/e2e -v
+
+# 5. Entry point works
+python -m focusquest --smoke-test
+
+# 6. No import cycles
+python -c "import src; print('✅ No circular imports')"
+
+# 7. Mocks are consistent
+grep -r "MockFactory" tests/ | wc -l
+# Should show many uses
+
+# 8. ADHD features tested
+pytest -k "panic or skip or hint or session" -v
+</verification_commands>
+
+<expected_outcomes>
+## Test Suite Health Report
+
+### Before:
+- Tests passing: 232/269 (86.2%)
+- Coverage: 75%
+- Slow GUI tests with segfaults
+- Inconsistent mocks
+- Scattered test files
+
+### After:
+- Tests passing: 269/269 (100%) ✅
+- Coverage: 85%+ ✅
+- Fast unit tests (<5s) ✅
+- Consistent mock factory ✅
+- Organized test structure ✅
+- Single entry point ✅
+- ADHD-optimized tests ✅
+
+### Commit History Should Show:
+1. "Test: Create comprehensive conftest.py with mock factory"
+2. "Test: Fix Database UI sync tests - use User.progress.level"
+3. "Test: Fix Circuit Breaker tests - expect ProblemAnalysis objects"
+4. "Test: Fix Skip Problem tests - use current_problem API"
+5. "Test: Add GUI test infrastructure with headless support"
+6. "Refactor: Consolidate entry points into __main__.py"
+7. "Refactor: Extract configuration to Config class"
+8. "Test: Organize into unit/integration/e2e structure"
+9. "Test: Add missing coverage for error paths"
+10. "Docs: Update test running instructions"
+</expected_outcomes>
+
+<adhd_optimization_notes>
+The refactored test suite is ADHD-friendly:
+
+1. **Fast Feedback**: Unit tests run in <5 seconds
+2. **Clear Structure**: Obvious where each test belongs
+3. **Consistent Patterns**: MockFactory for all mocks
+4. **Visual Progress**: Green dots show progress
+5. **Grouped Failures**: Similar issues together
+6. **One Command**: `pytest` just works
+7. **Skip Slow Tests**: `pytest -m "not slow"` for quick runs
+8. **Error Clarity**: Proper assertions with clear messages
+9. **Incremental Fixing**: `--lf -x` for one at a time
+10. **Progress Tracking**: Watch commands for real-time status
+</adhd_optimization_notes>

@@ -1,0 +1,149 @@
+<!-- prompts/prepare_deployment.xml -->
+<mission>
+Prepare FocusQuest for production deployment at Tel Aviv University.
+Ensure stability, performance, and ADHD-friendliness for real students.
+</mission>
+
+<deployment_environment>
+Target: TAU Computer Science students with ADHD
+Platform: Linux (students use various distros)
+Python: 3.9+ (university standard)
+Expected load: 50-100 concurrent users
+Critical period: Exam season (high stress)
+</deployment_environment>
+
+<perspective_1_technical>
+ultrathink about technical deployment requirements:
+
+1. Packaging: PyPI, Docker, or standalone?
+2. Dependencies: Are all versions pinned?
+3. Database: Migration strategy for updates?
+4. Configuration: How do users customize?
+5. Monitoring: How do we track issues?
+</perspective_1_technical>
+
+<perspective_2_user_experience>
+think hard about first-time user experience:
+
+1. Installation: Can ADHD student install in <5 minutes?
+2. First run: Is setup wizard needed?
+3. Tutorial: Interactive or video?
+4. Error messages: ADHD-friendly?
+5. Recovery: What if they mess up?
+</perspective_2_user_experience>
+
+<perspective_3_support>
+think about ongoing support needs:
+
+1. Documentation: Quick start guide?
+2. Troubleshooting: Common issues?
+3. Updates: Auto-update mechanism?
+4. Feedback: Bug reporting flow?
+5. Community: Discord/forum needed?
+</perspective_3_support>
+
+<pre_deployment_checklist>
+## Code Quality
+□ All 269 tests passing
+□ Coverage ≥ 85%
+□ No security vulnerabilities (bandit scan)
+□ No deprecated dependencies
+□ Type hints complete
+
+## Stability Testing
+□ 4-hour continuous run test
+□ Memory leak verification
+□ Crash recovery testing
+□ Network failure handling
+□ Database corruption recovery
+
+## Documentation
+□ README.md with quick start
+□ INSTALL.md with requirements
+□ USER_GUIDE.md with screenshots
+□ TROUBLESHOOTING.md
+□ CONTRIBUTING.md for open source
+
+## Packaging
+□ requirements.txt frozen
+□ setup.py configured
+□ VERSION file updated
+□ LICENSE file included
+□ .gitignore complete
+
+## Release Preparation
+□ GitHub release draft
+□ Changelog written
+□ Demo video recorded
+□ Test on clean machine
+□ Backup rollback plan
+</pre_deployment_checklist>
+
+<stability_test_protocol>
+#!/bin/bash
+# stability_test.sh
+
+echo "Starting 4-hour stability test..."
+
+# Start monitoring
+./scripts/monitor_resources.sh &
+MONITOR_PID=$!
+
+# Run application with test workload
+python -m focusquest --test-mode &
+APP_PID=$!
+
+# Simulate user activity
+python tests/simulate_user_activity.py --duration=14400 &
+SIM_PID=$!
+
+# Wait 4 hours
+sleep 14400
+
+# Collect results
+kill $MONITOR_PID $APP_PID $SIM_PID
+python scripts/analyze_stability_results.py
+
+echo "Stability test complete. Check results.json"
+</stability_test_protocol>
+
+<deployment_script>
+#!/bin/bash
+# deploy.sh
+
+VERSION=$(cat VERSION)
+echo "Deploying FocusQuest v$VERSION"
+
+# Run pre-flight checks
+pytest tests/ || exit 1
+python scripts/check_requirements.py || exit 1
+
+# Build package
+python setup.py sdist bdist_wheel
+
+# Create release bundle
+mkdir -p dist/focusquest-$VERSION
+cp -r dist/*.whl dist/focusquest-$VERSION/
+cp -r docs/ dist/focusquest-$VERSION/
+cp scripts/install.sh dist/focusquest-$VERSION/
+
+# Generate checksums
+cd dist/focusquest-$VERSION
+sha256sum * > checksums.txt
+
+# Create archive
+cd ..
+tar -czf focusquest-$VERSION.tar.gz focusquest-$VERSION/
+
+echo "Release bundle created: dist/focusquest-$VERSION.tar.gz"
+echo "Ready to upload to GitHub releases"
+</deployment_script>
+
+<post_deployment_monitoring>
+# Set up monitoring for production
+- Error tracking: Sentry integration
+- Performance: New Relic or DataDog
+- User analytics: Privacy-respecting metrics
+- Feedback: In-app feedback widget
+- Health check: /api/health endpoint
+</post_deployment_monitoring>

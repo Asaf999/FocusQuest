@@ -52,8 +52,16 @@ class FocusQuestSyncWindow(FocusQuestIntegratedWindow):
         if user_data:
             # Update XP widget with user data
             if hasattr(self, 'xp_widget'):
-                self.xp_widget.set_level(user_data['level'])
-                self.xp_widget.set_xp(user_data['total_xp'])
+                level = user_data['level']
+                total_xp = user_data['total_xp']
+                self.xp_widget.set_level(level)
+                
+                # Calculate XP within current level
+                xp_for_current_level = self.xp_widget.calculate_xp_for_level(level)
+                xp_for_previous_levels = sum(self.xp_widget.calculate_xp_for_level(i) for i in range(1, level))
+                xp_in_current_level = total_xp - xp_for_previous_levels
+                
+                self.xp_widget.set_xp(xp_in_current_level, xp_for_current_level)
                 
             # Start new session
             session_id = self.state_sync.start_session()
@@ -85,7 +93,7 @@ class FocusQuestSyncWindow(FocusQuestIntegratedWindow):
     def _connect_sync_events(self):
         """Connect UI events to state sync."""
         # Problem events
-        if hasattr(self, 'problem_widget'):
+        if hasattr(self, 'problem_widget') and self.problem_widget is not None:
             self.problem_widget.step_completed.connect(self._on_step_completed)
             self.problem_widget.hint_used.connect(self._on_hint_used)
             
@@ -104,7 +112,20 @@ class FocusQuestSyncWindow(FocusQuestIntegratedWindow):
         # Call parent to load problem
         super().load_problem(problem_data)
         
-    def _on_problem_completed(self):
+    def _calculate_xp_reward(self) -> int:
+        """Calculate XP reward based on performance."""
+        base_xp = 50  # Base XP for completion
+        
+        # Add bonuses
+        if hasattr(self, '_hints_used'):
+            # Bonus for using fewer hints
+            hints_penalty = self._hints_used * 5
+            base_xp = max(10, base_xp - hints_penalty)
+            
+        # Could add more bonuses for time, accuracy, etc.
+        return base_xp
+        
+    def on_problem_completed(self, problem_id: int):
         """Override to save completion to database."""
         # Calculate XP earned
         xp_earned = self._calculate_xp_reward()
@@ -117,7 +138,7 @@ class FocusQuestSyncWindow(FocusQuestIntegratedWindow):
         self.user_stats_updated.emit(stats)
         
         # Call parent
-        super()._on_problem_completed()
+        super().on_problem_completed(problem_id)
         
     def skip_problem(self):
         """Override to track skips in database."""

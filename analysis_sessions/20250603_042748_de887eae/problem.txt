@@ -1,0 +1,18 @@
+PROBLEM METADATA:
+Course: Introduction to Proofs
+Topic: Number Theory
+Difficulty Estimate: easy
+Source: PDF
+Page: Unknown
+
+PROBLEM TEXT:
+Prove that sqrt(2) is irrational.
+
+SPECIAL INSTRUCTIONS:
+- This is for an ADHD student
+- Final semester at Tel Aviv University
+- Prefers visual/concrete explanations
+- Gets overwhelmed by abstract notation
+- Needs dopamine hits from progress
+
+Analyze this problem according to CLAUDE.md instructions.
